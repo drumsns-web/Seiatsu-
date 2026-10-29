@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>制圧 SEIATSU — タクティカルFPS試作</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<!-- 読み込み失敗時の表示 -->
+<div id="fps"></div>
+<div id="boot-error"><div><h2>起動できませんでした</h2><p></p></div></div>
+
+<!-- プレイ中の表示 -->
+<div id="hud">
+  <div id="objective"></div>
+  <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="scope" aria-hidden="true">
+    <svg class="reticle" viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet">
+      <line x1="-100" y1="0" x2="-6" y2="0"/><line x1="6" y1="0" x2="100" y2="0"/>
+      <line x1="0" y1="-100" x2="0" y2="-6"/><line x1="0" y1="6" x2="0" y2="100"/>
+      <line class="thick" x1="-100" y1="0" x2="-55" y2="0"/><line class="thick" x1="55" y1="0" x2="100" y2="0"/>
+      <line class="thick" x1="0" y1="55" x2="0" y2="100"/>
+      <g class="dots"><circle cx="-20" cy="0" r="1.2"/><circle cx="-35" cy="0" r="1.2"/><circle cx="20" cy="0" r="1.2"/><circle cx="35" cy="0" r="1.2"/><circle cx="0" cy="20" r="1.2"/><circle cx="0" cy="35" r="1.2"/><circle cx="0" cy="-20" r="1.2"/><circle cx="0" cy="-35" r="1.2"/></g>
+      <circle class="center" cx="0" cy="0" r="0.9"/>
+    </svg>
+    <div id="zoom">4.0倍</div>
+  </div>
+  <div id="reddot"><b></b><i></i></div>
+  <div id="vignette"></div>
+  <div id="dmg-dirs"></div>
+  <div id="msg"></div>
+  <div id="reload-bar"><div id="reload-fill"></div><span>リロード中</span></div>
+  <div id="hp"><div class="row"><span id="hp-num">100</span><span class="unit">体力</span></div><div class="bar"><div id="hp-fill"></div></div><div id="posture">立ち</div></div>
+  <div id="ammo"><div id="weapon-slots"></div><div class="row"><span id="ammo-cur">30</span><span class="sep">/</span><span id="ammo-res">240</span></div><div class="weapon" id="weapon-name">AR-7 アサルトライフル</div></div>
+  <div id="hint"></div>
+  <div id="debug"><div id="debug-labels"></div><div id="dbg-fps"></div></div>
+</div>
+
+<!-- タイトル・中断メニュー -->
+<div id="menu">
+  <div id="menu-main">
+    <div class="stripe"></div>
+    <h1>制圧<span class="romaji">SEIATSU</span></h1>
+    <p class="lede">敵が12人います。慎重に進み、全員を排除して開始地点の脱出地点へ戻ってください。</p>
+    <label class="map-pick">作戦地域
+      <select id="map-select"></select>
+    </label>
+    <p id="map-desc" class="map-desc"></p>
+    <p class="paused-label">一時停止中</p>
+    <div class="actions">
+      <button id="btn-start" class="primary only-main">出撃する</button>
+      <button id="btn-resume" class="primary only-pause">再開する</button>
+      <button id="btn-restart" class="only-pause">最初からやり直す</button>
+      <button data-open="loadout">装備</button>
+      <button data-open="controls">操作一覧</button>
+      <button data-open="keys">キー設定</button>
+      <button data-open="pad">コントローラー</button>
+      <button data-open="settings">設定</button>
+    </div>
+    <p id="loadout-sum" class="loadout-sum"></p>
+    <p id="menu-note" role="status"></p>
+    <p class="hint">ヘッドホン推奨。敵の足音と銃声は方向と距離に応じて聞こえます。</p>
+  </div>
+
+  <section class="panel" id="panel-controls">
+    <h2>操作一覧</h2>
+    <table class="list">
+      <tr><td>移動</td><td>W A S D</td></tr>
+      <tr><td>視点</td><td>マウス</td></tr>
+      <tr><td>射撃</td><td>左クリック（押し続けると連射）</td></tr>
+      <tr><td>照準・スコープ</td><td>右クリックを押している間。ホイール、または X（上げる）／Z（下げる）で2〜8倍（0.5刻み）</td></tr>
+      <tr><td>リロード</td><td>R</td></tr>
+      <tr><td>リーン</td><td>Q で左、E で右。もう一度押すと中央へ。Q と E で直接切り替え</td></tr>
+      <tr><td>しゃがみ</td><td>C（切り替え）</td></tr>
+      <tr><td>匍匐</td><td>左Ctrl（切り替え）</td></tr>
+      <tr><td>ダッシュ</td><td>左Shift を押している間（立ち姿勢で前進中のみ）</td></tr>
+      <tr><td>近接ナイフ</td><td>V</td></tr>
+      <tr><td>サプレッサー</td><td>T で取り付け・取り外し（ライフルとハンドガン）。出撃前は「装備」で選べる</td></tr>
+      <tr><td>武器の持ち替え</td><td>1 アサルトライフル／2 ハンドガン／3 ショットガン（設定でホイールに割り当てることもできる）</td></tr>
+      <tr><td>手りゅう弾</td><td>G またはマウス中央クリック（ホイールの押し込み）を押し続けると構え、落ちる場所までの軌道と爆風の範囲が表示される。離すと投げる（2.6秒後に爆発）。最初は2個、敵の落とした弾薬から補充できることがある</td></tr>
+      <tr><td>歩く速さ</td><td>照準していないときにホイールを上下すると5段階（35〜100％）で変わる。左Alt を押している間は最も遅く歩く。遅いほど足音が小さく、敵に聞かれにくい</td></tr>
+      <tr><td>AI状態の表示</td><td>F3</td></tr>
+      <tr><td>一時停止</td><td>Esc</td></tr>
+    </table>
+    <p class="small">キーは「キー設定」で変更できます。上の表は初期設定です。匍匐（左Ctrl）を押したまま W を押すと、ブラウザーがタブを閉じることがあります。設定の「全画面で遊ぶ」を有効にすると Chrome と Edge では防げます。</p>
+    <button data-close>戻る</button>
+  </section>
+
+  <section class="panel" id="panel-keys">
+    <h2>キー設定</h2>
+    <div class="scroll"><table class="list keys"><tbody id="keys-body"></tbody></table></div>
+    <p id="key-note" class="small" role="status"></p>
+    <div class="actions row">
+      <button id="btn-reset-keys">初期設定に戻す</button>
+      <button data-close>戻る</button>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-loadout">
+    <h2>装備</h2>
+    <p class="small">出撃前に選びます（変えるとすぐ反映されます）。ゲーム中も T キーでサプレッサーを付け外しできます。</p>
+    <h3 class="sub">AR-7 アサルトライフル</h3>
+    <label class="field">照準器
+      <select id="lo-optic"><option value="scope">長距離スコープ（2〜8倍。遠くの敵向き）</option><option value="dot">近距離ドットサイト（1.3倍。素早く狙える、周りが見える）</option></select>
+    </label>
+    <label class="field check"><input id="lo-arsup" type="checkbox"> サプレッサーを付ける</label>
+    <h3 class="sub">P-9 ハンドガン</h3>
+    <label class="field check"><input id="lo-pistolsup" type="checkbox"> サプレッサーを付ける</label>
+    <h3 class="sub">S-12 ショットガン</h3>
+    <p class="small">付けられるものはありません。</p>
+    <p class="small">サプレッサーを付けると、銃声がくぐもり、敵に聞こえる距離が約3割になり、発射炎もほとんど出なくなります。威力・命中は変わりません。</p>
+    <button data-close>戻る</button>
+  </section>
+
+  <section class="panel" id="panel-pad">
+    <h2>コントローラー</h2>
+    <p id="pad-status" class="pad-status"></p>
+    <div class="scroll"><table class="list keys"><tbody id="pad-body"></tbody></table></div>
+    <p id="pad-note" class="small" role="status"></p>
+    <label class="field check"><input id="pad-assist" type="checkbox"> エイム補助（照準の近くに敵がいると視点が遅くなり、少し引き寄せられる）</label>
+    <label class="field">スティックの視点感度 <span id="pad-sens-val">1.00</span><input id="pad-sens" type="range" min="0.3" max="2.5" step="0.05"></label>
+    <label class="field check"><input id="pad-invert" type="checkbox"> 視点の上下を反転</label>
+    <label class="field check"><input id="pad-vib" type="checkbox"> 振動（射撃・被弾）</label>
+    <p class="small">コントローラーがつながっていると、「出撃する」でマウスを固定せずに始まります。Menu／Optionsボタンで一時停止と再開ができます。タブレットではBluetoothでつないでください。振動は対応しているブラウザーとコントローラーでのみ働きます。</p>
+    <div class="actions row">
+      <button id="btn-reset-pad">初期設定に戻す</button>
+      <button data-close>戻る</button>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-settings">
+    <h2>設定</h2>
+    <label class="field">マウス感度 <span id="sens-val">1.00</span><input id="sens" type="range" min="0.2" max="3" step="0.05"></label>
+    <label class="field">敵の命中精度
+      <select id="diff"><option value="0.65">低い（練習向け）</option><option value="1">標準</option><option value="1.3">高い</option></select>
+    </label>
+    <label class="field">流血表現
+      <select id="gore"><option value="on">オン</option><option value="low">控えめ</option><option value="off">オフ</option></select>
+    </label>
+    <label class="field">画質
+      <select id="quality"><option value="high">高（高解像度・影・画面効果）</option><option value="standard">標準（影・画面効果）</option><option value="low">軽量（影と画面効果なし・照明を減らす）</option></select>
+    </label>
+    <label class="field check"><input id="show-fps" type="checkbox"> フレームレートを画面右上に表示</label>
+    <label class="field">チームの色（腕章）
+      <select id="team"><option value="red">赤</option><option value="blue">青</option></select>
+    </label>
+    <label class="field">照準していないときのホイール
+      <select id="wheelmode"><option value="speed">歩く速さを変える（上で速く、下で遅く）</option><option value="weapon">武器を持ち替える</option></select>
+    </label>
+    <label class="field">足音・装備の音の大きさ <span id="stepvol-val">100%</span><input id="stepvol" type="range" min="0" max="1.5" step="0.05"></label>
+    <label class="field">マウスの動き
+      <select id="rawmouse"><option value="os">標準（Windowsのマウス設定どおり）</option><option value="raw">生の入力（加速なし。FPSに慣れた人向け）</option></select>
+    </label>
+    <label class="field check"><input id="autores" type="checkbox"> 重いときは解像度を自動で下げて滑らかさを優先する</label>
+    <label class="field check"><input id="touchpad" type="checkbox"> タッチパッドの誤入力を防ぐ（ノートPC向け）</label>
+    <p class="small">オンにすると、タッチパッドの軽いタップを射撃・照準として扱わず、2本指スクロールでスコープ倍率が変わらなくなります。そのかわり、クリックしてから撃ち始めるまでに0.06秒の遅れが出ます。タッチパッドそのものを止めるには、Windowsの「設定」→「Bluetoothとデバイス」→「タッチパッド」でオフにしてください（多くのノートPCは、Fnキーと組み合わせたキーでも切り替えられます）。</p>
+    <label class="field check"><input id="fs" type="checkbox"> 全画面で遊ぶ（Ctrl＋W などの誤操作防止。Chrome／Edge）</label>
+    <button data-close>戻る</button>
+  </section>
+</div>
+
+<!-- 終了画面 -->
+<div id="end">
+  <div>
+    <h2 id="end-title"></h2>
+    <p id="end-sub"></p>
+    <p id="end-stats"></p>
+    <div class="actions row">
+      <button id="btn-retry" class="primary">もう一度挑戦する</button>
+      <button id="btn-end-menu">タイトルへ戻る</button>
+    </div>
+  </div>
+</div>
+
+<!-- Three.js：同じフォルダーの js/three.min.js を優先し、無ければCDNから読み込む -->
+<script src="js/three.min.js"></script>
+<script>
+  if (!window.THREE) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');
+</script>
+<script>
+  if (!window.THREE) document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>');
+</script>
+<script src="js/lib/RoundedBoxGeometry.js"></script>
+<script src="js/lib/BufferGeometryUtils.js"></script>
+<script src="js/lib/CopyShader.js"></script>
+<script src="js/lib/LuminosityHighPassShader.js"></script>
+<script src="js/lib/EffectComposer.js"></script>
+<script src="js/lib/ShaderPass.js"></script>
+<script src="js/lib/UnrealBloomPass.js"></script>
+<script src="js/lib/RoomEnvironment.js"></script>
+<script src="js/input.js"></script>
+<script src="js/gamepad.js"></script>
+<script src="js/world.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/grenade.js"></script>
+<script src="js/viewmodel.js"></script>
+<script src="js/humanoid.js"></script>
+<script src="js/enemy.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
