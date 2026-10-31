@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>SEIATSU 装備確認</title>
+<style>body{margin:0;background:#20292d;color:#e0e6df;font:16px system-ui}header{padding:16px 24px;display:flex;align-items:center;gap:16px}button{padding:8px 18px;background:#45565c;color:white;border:1px solid #7f9397;border-radius:4px}.names{display:flex;max-width:1100px;margin:auto;text-align:center;padding:8px}.names span{width:25%}iframe{border:0;width:100%;height:620px;display:block}small{color:#9eafb0}</style>
+<header><b>SEIATSU — 装備バリエーション</b><button id="full">全身</button><button id="head">顔まわり</button><button id="part">部位分離の確認</button><small>敵の配色は共通・装備を混在</small></header>
+<div class="names"><span>素顔</span><span>ヘルメット</span><span>サングラス</span><span>ヘルメット＋サングラス</span></div><iframe id="game" src="../index.html?autotest&manual"></iframe>
+<script>
+const f=document.querySelector('iframe');let view;
+f.onload=()=>{
+ const w=f.contentWindow,g=w.G,T=w.THREE;g.Menu.show(null);g.Touch.setMode('off');w.document.querySelector('#hud').style.display='none';
+ const scene=new T.Scene();scene.background=new T.Color('#344149');scene.environment=g.Game.scene.environment;
+ scene.add(new T.HemisphereLight(0xe4efff,0x424c39,1.2));const light=new T.DirectionalLight(0xffead4,1.8);light.position.set(12,5,17);scene.add(light);const fill=new T.DirectionalLight(0xadcfff,.65);fill.position.set(8,2,11);scene.add(fill);
+ const ground=new T.Mesh(new T.PlaneGeometry(20,20),new T.MeshStandardMaterial({color:0x465153,roughness:.98}));ground.rotation.x=-Math.PI/2;ground.position.set(12,0,12);scene.add(ground);
+ const camera=new T.PerspectiveCamera(36,w.innerWidth/w.innerHeight,.02,40),renderer=g.Game.renderer;renderer.setSize(w.innerWidth,w.innerHeight);renderer.setPixelRatio(1);renderer.autoClear=true;
+ const actors=['none','helmet','sunglasses','helmet-sunglasses'].map((gear,i)=>{const h=g.Humanoid.create({gear});h.root.position.set(10.7+i*1.15,0,12.5);scene.add(h.root);h.update({dt:1/60,speed:0,crouch:0,aim:0,aimPitch:0,twist:0,reload:-1,scene});return h;});
+ const render=()=>{renderer.setRenderTarget(null);renderer.clear();renderer.render(scene,camera);};
+ view={full(){camera.position.set(12.425,1.35,16.4);camera.lookAt(12.425,.94,12.5);render();},head(){camera.position.set(12.425,1.72,16);camera.lookAt(12.425,1.67,12.5);camera.zoom=1.1;camera.updateProjectionMatrix();render();},part(){g.Physics.scene=scene;g.Game.dismember=true;actors.forEach((h,i)=>{h.die('x',1);h.update({dt:1/60,scene});if(i)g.Physics.sever(h,{part:['head','head','arms','legs'][i],side:1,dir:new T.Vector3(0,0,1)});});for(let i=0;i<75;i++)g.Physics.update(1/60);camera.zoom=1;camera.position.set(12.425,3.8,16);camera.lookAt(12.425,.3,12.8);camera.updateProjectionMatrix();render();}};
+ view.full();
+};
+document.querySelector('#full').onclick=()=>{view?.full();};document.querySelector('#head').onclick=()=>view?.head();document.querySelector('#part').onclick=()=>view?.part();
+</script>

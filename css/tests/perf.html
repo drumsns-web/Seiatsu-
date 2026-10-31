@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>Firing performance</title>
+<pre id="result">Loading...</pre><iframe id="game" width="640" height="360"></iframe>
+<script>
+document.getElementById('game').onload=async()=>{
+ try {
+  const g=document.getElementById('game').contentWindow.G, M=g.Game, P=g.Player, FX=g.Effects;
+  const win=document.getElementById('game').contentWindow;
+  await new Promise(resolve=>win.requestAnimationFrame(()=>win.requestAnimationFrame(resolve)));
+  M.allyCount=0; M.reset(); M.state='playing'; g.Input.enabled=true; g.Audio.init(); g.Audio.master.gain.value=0;
+  g.Enemies.list.forEach(e=>{e.pos.set(40,0,30);e.update=()=>{};});
+  await new Promise(resolve=>win.requestAnimationFrame(()=>win.requestAnimationFrame(resolve)));
+  const measure=(fn)=>{const t=performance.now();fn();return +(performance.now()-t).toFixed(3);};
+  P.cur='ar';P.ammo=300;
+  const preRender=measure(()=>M.render()), idleRender=measure(()=>M.render());
+  if(location.search.includes('nocasing'))FX.ejectPlayerCasing=()=>{};
+  if(location.search.includes('noflash')){FX.playerFlash=()=>{};g.Viewmodel.fire=()=>{};}
+  if(location.search.includes('noimpact'))FX.impact=()=>{};
+  const firstShot=measure(()=>P.shoot()),firstRender=measure(()=>M.render());
+  const secondShot=measure(()=>P.shoot()),secondRender=measure(()=>M.render());
+  const shots=measure(()=>{for(let i=0;i<24;i++){P.shoot();M.render();}});
+  const casings=measure(()=>{for(let i=0;i<120;i++)FX.update(1/60);});
+  document.getElementById('result').textContent=JSON.stringify({preRender,idleRender,firstShot,firstRender,secondShot,secondRender,shots,casings,visibleCasings:FX.casings.filter(c=>c.mesh.visible).length},null,2);
+ }catch(e){document.getElementById('result').textContent=e.stack;}
+};
+localStorage.setItem('cq_settings_v1',JSON.stringify({q:new URLSearchParams(location.search).get('quality')||'low',fs:false,allies:0}));
+document.getElementById('game').src='../index.html?autotest&manual';
+</script>

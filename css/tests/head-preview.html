@@ -1,0 +1,23 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>SEIATSU 頭部表現</title>
+<style>body{margin:0;background:#182023;color:#e7e7e7;font:16px system-ui}header{padding:12px 20px}iframe{display:block;width:100%;height:610px;border:0}.labels{display:flex;justify-content:center;gap:280px;padding:8px}</style>
+<header>頭部の表現確認：左が通常、右がショットガン命中後</header><div class="labels"><span>通常</span><span>顔の上部が破裂</span></div>
+<iframe id="game" src="../index.html?autotest&manual"></iframe>
+<script>
+const f=document.getElementById('game');
+f.onload=()=>{
+ const w=f.contentWindow,g=w.G,T=w.THREE,scene=new T.Scene(),renderer=g.Game.renderer;
+ w.document.getElementById('hud').style.display='none';g.Touch.setMode('off');g.Menu.show(null);
+ scene.background=new T.Color(0x384248);
+ scene.add(new T.HemisphereLight(0xffffff,0x626060,1.6));
+ const sun=new T.DirectionalLight(0xfff0df,2);sun.position.set(10,5,16);scene.add(sun);
+ const camera=new T.PerspectiveCamera(38,w.innerWidth/w.innerHeight,.02,30);
+ const h1=g.Humanoid.create({gear:'none'}),h2=g.Humanoid.create({gear:'none'});
+ h1.root.position.set(11.9,0,12.5);h2.root.position.set(13.1,0,12.5);
+ for(const h of [h1,h2]){scene.add(h.root);h.update({dt:1/60,speed:0,crouch:0,aim:0,aimPitch:0,twist:0,reload:-1,scene});}
+ g.Physics.scene=scene;g.Game.dismember=true;g.Physics.sever(h2,{part:'head',side:0,dir:new T.Vector3(0,0,.1)});
+ for(let i=0;i<120;i++)g.Physics.update(1/60);
+ camera.position.set(12.5,1.66,14.65);camera.lookAt(12.5,1.68,12.5);
+ g.Game.render=()=>{renderer.setRenderTarget(null);renderer.clear();renderer.render(scene,camera);};
+ g.Game.render();
+};
+</script></html>

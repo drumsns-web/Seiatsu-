@@ -1,0 +1,64 @@
+<!doctype html><meta charset="utf-8"><title>SEIATSU v14 tests</title>
+<p><a href="../index.html" style="color:#f1c65b">ゲームを開く（v14）</a></p>
+<style>body{font:14px monospace;background:#152025;color:#eee}button{padding:12px}iframe{display:block;border:0;width:844px;height:390px}pre{white-space:pre-wrap} .fail{color:#ffa197}</style>
+<h1>SEIATSU 検証</h1><button id="run">全テスト実行</button><button id="mobile">スマホ横画面</button><button id="portrait">スマホ縦画面</button><button id="scope-preview">スコープ表示</button><button id="command-preview">部隊指示表示</button><pre id="result">待機中</pre><div id="frame"></div>
+<script>
+const result=document.querySelector('#result'), holder=document.querySelector('#frame');
+async function load(){const old=holder.querySelector("iframe");if(old?.contentWindow.G?.Game?.renderer)old.contentWindow.G.Game.renderer.forceContextLoss();holder.replaceChildren(); const f=document.createElement('iframe'); holder.append(f); await new Promise(r=>{f.onload=r;f.src='../index.html?autotest&manual';});return f;}
+async function run(){const reports=[];document.querySelector('#run').disabled=true;localStorage.setItem('cq_map_v1',JSON.stringify('facility'));localStorage.setItem('cq_settings_v1',JSON.stringify({q:'low',fs:false,allies:0}));
+for(const name of (new URLSearchParams(location.search).has('combat')?['combat-tests.js','knife-tests.js','medical-aid-tests.js']:new URLSearchParams(location.search).has('weapon')?['weapon-tests.js','weapon-sound-tests.js']:new URLSearchParams(location.search).has('quick')?['features-tests.js','revision-tests.js','acoustics-tests.js','radio-command-tests.js','weapon-sound-tests.js','loadout-tests.js','medical-aid-tests.js']:['features-tests.js','input-tests.js','pad-tests.js','weapon-tests.js','auto-tests.js','revision-tests.js','combat-tests.js','knife-tests.js','acoustics-tests.js','radio-command-tests.js','weapon-sound-tests.js','loadout-tests.js','medical-aid-tests.js'])){result.textContent='実行中: '+name; const f=await load();try{const text=await (await fetch(name)).text();const report=await f.contentWindow.eval('var $ = id => document.getElementById(id);\n'+text);reports.push({name,report});await fetch("/qa-result",{method:'POST',body:JSON.stringify(reports)});}catch(e){reports.push({name,report:'FAIL '+e.stack});}}
+result.textContent=reports.map(x=>x.name+'\n'+x.report).join('\n\n');await fetch('/qa-result',{method:'POST',body:JSON.stringify(reports)});document.querySelector('#run').disabled=false;}
+document.querySelector('#run').onclick=run;
+async function preview(w,h,scoped=false,orders=false){const f=await load();f.style.width=w+'px';f.style.height=h+'px'; const g=f.contentWindow.G;if(orders){g.Game.allyCount=2;g.Game.reset();}g.Touch.setMode('on');g.Game.testMode=true;g.Game.manual=false;g.Enemies.list.forEach(e=>e.update=()=>{});g.Player.pos.set(12.5,0,2.5);g.Player.yaw=Math.PI;g.Player.pitch=0;g.Player.camInit=false;if(scoped){g.Input.mouse.rmb=true;g.Player.adsT=1;}g.Game.last=f.contentWindow.performance.now();g.Game.frame(g.Game.last);g.Menu.show(null);if(orders){g.Allies.select('both');g.Allies.orderMove(new f.contentWindow.THREE.Vector3(12.5,0,6.5));g.HUD.radio('ALPHA','Roger. Moving to your mark.');g.HUD.update(0);}g.Game.render();result.textContent=(orders?'部隊指示プレビュー ':'タッチ操作プレビュー ')+w+'×'+h;}
+document.querySelector('#scope-preview').onclick=()=>preview(1000,600,true);
+document.querySelector('#mobile').onclick=()=>preview(844,390);document.querySelector('#portrait').onclick=()=>preview(390,844);
+document.querySelector('#command-preview').onclick=()=>preview(844,390,false,true);
+for(const [label,mode]of [['医療品の装備','loadout'],['回復のキー設定','keys'],['仲間の救護表示','aid'],['死亡カメラ','death']]){
+ const b=document.createElement('button');b.textContent=label;document.querySelector('#run').before(b);
+ b.onclick=async()=>{
+   const f=await load();f.style.width='1000px';f.style.height='650px';const g=f.contentWindow.G,T=f.contentWindow.THREE;
+   if(mode==='loadout'||mode==='keys'){g.Game.state='menu';g.Menu.show('main');g.Menu.panel(mode);g.Game.render();if(mode==='loadout')f.contentDocument.getElementById('lo-stim').scrollIntoView({block:'center'});return;}
+   g.Game.allyCount=2;g.Game.reset();g.Game.state='playing';g.Menu.show(null);g.Touch.setMode('off');g.Input.enabled=true;
+   g.Enemies.list.forEach(e=>{e.pos.set(40,0,30);e.update=()=>{};e.syncModel(1/60);});
+   g.Player.pos.set(12.5,0,2.5);g.Player.yaw=Math.PI;g.Player.pitch=-.1;g.Player.camInit=false;
+   g.Allies.mode='hold';g.Allies.list.forEach((a,i)=>{a.pos.set(12.5+i,0,3.8);a.moveState='holding';a.hp=35+i*55;a.hurtT=g.time;a.percT=999;a.syncModel(1/60);});
+   g.Player.med.stim=1;g.Game.step(2);
+   if(mode==='death'){g.Player.hp=.001;g.Player.wounds=[{type:'light',area:'arm',rate:1}];g.Game.step(100);}
+   g.HUD.update(0);const draw=()=>{if(!f.isConnected)return;g.Game.render();f.contentWindow.requestAnimationFrame(draw);};draw();result.textContent=label;
+ };
+}
+const gearButton=document.createElement('button');gearButton.textContent='装備を表示';document.querySelector('#run').after(gearButton);
+gearButton.onclick=async()=>{
+ const f=await load();f.style.width='1000px';f.style.height='650px';const g=f.contentWindow.G,T=f.contentWindow.THREE;
+ g.Game.manual=true;g.Menu.show(null);f.contentDocument.getElementById('hud').style.display='none';g.Touch.setMode('off');
+ const scene=new T.Scene();scene.background=new T.Color(0x444950);scene.add(new T.HemisphereLight(0xffffff,0x7a8795,1.2));
+ const key=new T.DirectionalLight(0xffffff,2);key.position.set(2,4,3);scene.add(key);
+ for(const [i,angle]of [[0,-.2],[1,1.1]]){
+   const h=g.Humanoid.create({style:'swat',team:'blue',gear:'helmet-sunglasses'});h.root.position.x=(i-.5)*.85;h.root.rotation.y=angle;scene.add(h.root);
+   for(let n=0;n<40;n++)h.update({dt:1/60,speed:0,crouch:0,aim:0,aimPitch:0,twist:0,reload:-1,scene});
+ }
+ g.camera.position.set(0,1.85,2.6);g.camera.lookAt(new T.Vector3(0,1.45,0));g.camera.fov=35;g.camera.updateProjectionMatrix();
+ const draw=()=>{if(!f.isConnected)return;g.Game.renderer.setRenderTarget(null);g.Game.renderer.render(scene,g.camera);f.contentWindow.requestAnimationFrame(draw);};draw();
+ result.textContent='SWAT装備：正面と斜め側面';
+};
+const ragdollButton=document.createElement('button');ragdollButton.textContent='倒れ方を表示';document.querySelector('#run').after(ragdollButton);
+ragdollButton.onclick=async()=>{
+ const f=await load();f.style.width='1000px';f.style.height='650px';const g=f.contentWindow.G,T=f.contentWindow.THREE;
+ g.Game.manual=true;g.Game.state='playing';g.Menu.show(null);g.Viewmodel.setVisible(false);
+ g.Enemies.list.forEach(e=>e.body.root.visible=false);g.Allies.list.forEach(e=>e.body.root.visible=false);
+ for(const [i,posture]of ['stand','crouch','prone'].entries()){
+   const h=g.Humanoid.create();h.root.position.set(25+i*1.4,0,16.5);g.Game.scene.add(h.root);
+   for(let n=0;n<100;n++)h.update({dt:1/60,speed:0,crouch:posture==='crouch'?1:0,prone:posture==='prone',aim:0,aimPitch:0,twist:0,reload:-1,scene:g.Game.scene});
+   h.die('x',1);h.update({dt:1/60,scene:g.Game.scene});
+ }
+ for(let i=0;i<240;i++)g.Physics.update(1/60);
+ g.camera.position.set(26.4,4.8,20.8);g.camera.lookAt(new T.Vector3(26.4,0,16.5));g.camera.fov=55;g.camera.updateProjectionMatrix();
+ const draw=()=>{if(!f.isConnected)return;g.Game.render();f.contentWindow.requestAnimationFrame(draw);};draw();
+ result.textContent='左から立位・しゃがみ・匍匐から倒れた最終姿勢';
+};
+</script>
+
+
+
+
+
