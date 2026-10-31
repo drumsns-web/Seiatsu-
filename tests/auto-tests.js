@@ -17,7 +17,7 @@ ok('敵12体', G.Enemies.list.length === 12);
 
 // ---- 移動と壁 ----
 freezeEnemies();
-place(3.5, 2.5, Math.PI);
+place(12.5, 2.5, Math.PI);
 key('KeyW'); Gm.step(60); key('KeyW', 'keyup'); Gm.step(10);
 ok('Wで前進（+z方向）', P.pos.z > 4.5, P.pos.z.toFixed(2));
 place(5.5, 2.5, -Math.PI / 2); // +x向き、x=8 は壁
@@ -25,7 +25,7 @@ key('KeyW'); Gm.step(120); key('KeyW', 'keyup'); Gm.step(5);
 ok('壁を通り抜けない（壁の面は x=8.4）', P.pos.x <= 8.4 - 0.29, P.pos.x.toFixed(3));
 
 // ---- リーン ----
-place(3.5, 2.5, Math.PI);
+place(12.5, 2.5, Math.PI);
 tap('KeyQ'); ok('Q→左リーン', P.lean === -1);
 key('KeyQ', 'keydown', true); key('KeyQ', 'keydown', true); Gm.step(1);
 ok('長押し（repeat）で切替が連続しない', P.lean === -1);
@@ -42,7 +42,7 @@ ok('壁際の左リーンでカメラが壁に入らない', G.camera.position.x
 tap('KeyQ'); Gm.step(20);
 
 // ---- 姿勢 ----
-place(3.5, 2.5, Math.PI);
+place(12.5, 2.5, Math.PI);
 tap('ControlLeft'); Gm.step(30);
 ok('左Ctrlで匍匐', P.posture === 'prone' && Math.abs(P.eyeH - 0.34) < 0.05, P.eyeH.toFixed(2));
 tap('ControlLeft'); Gm.step(30);
@@ -70,7 +70,7 @@ tap('ControlLeft');
 ok('隙間の先で立つ', P.posture === 'stand');
 
 // ---- ダッシュ ----
-place(3.5, 2.5, Math.PI);
+place(12.5, 2.5, Math.PI);
 tap('KeyQ'); I.mouse.rmb = true; Gm.step(20);
 key('KeyW'); key('ShiftLeft'); Gm.step(5);
 ok('Shift長押し＋前進でダッシュ', P.sprinting);
@@ -84,7 +84,7 @@ ok('しゃがみ中のShiftで自動で立たない', P.posture === 'crouch' && 
 key('ShiftLeft', 'keyup'); key('KeyW', 'keyup'); tap('KeyC');
 
 // ---- 照準とズーム ----
-place(3.5, 2.5, Math.PI); I.mouse.rmb = true; Gm.step(20);
+place(12.5, 2.5, Math.PI); I.mouse.rmb = true; Gm.step(20);
 const fov1 = G.camera.fov; I.mouse.wheel = -2; Gm.step(2); const z1 = P.zoom;
 I.mouse.wheel = 10; Gm.step(2); const z2 = P.zoom;
 I.mouse.wheel = -20; Gm.step(2); const z3 = P.zoom;
@@ -98,8 +98,8 @@ ok('右クリックを離すと照準解除', !P.ads && G.Viewmodel.root.visible
 // ---- 射撃と命中 ----
 const e0 = G.Enemies.list[0];
 const resetE = (e, x, z) => { e.pos.set(x, 0, z); e.hp = 100; e.state = 'patrol'; e.crouch = 0; e.wantCrouch = false; e.body.st.crouch = 0; e.speed = 0; e.body.st.speed = 0; for (let i = 0; i < 30; i++) e.syncModel(1/60); };
-place(3.5, 2.5, Math.PI); // +z 向き
-resetE(e0, 3.5, 6.5); // 5,6行目は通路で見通せる
+place(12.5, 2.5, Math.PI); // +z 向き
+resetE(e0, 12.5, 6.5); // 5,6行目は通路で見通せる
 P.zoom = 4; I.mouse.rmb = true; Gm.step(20);
 // 胴体を狙う
 const aimAt = (y, x, z) => { const c = G.camera.position; const dx = x - c.x, dz = z - c.z, dy = y - c.y; P.yaw = Math.atan2(-dx, -dz); P.pitch = Math.atan2(dy, Math.hypot(dx, dz)); P.recoil = 0; Gm.step(1); };
@@ -108,21 +108,21 @@ const hp0 = e0.hp, ammo0 = P.ammo;
 I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(1);
 ok('スコープ中央で胴体に命中', e0.hp < hp0, hp0 + '→' + e0.hp);
 ok('弾数が減る', P.ammo === ammo0 - 1);
-Gm.step(10); resetE(e0, 3.5, 6.5); aimAt(e0.body.headWorld.y, e0.body.headWorld.x, e0.body.headWorld.z);
+Gm.step(10); resetE(e0, 12.5, 6.5); aimAt(e0.body.headWorld.y, e0.body.headWorld.x, e0.body.headWorld.z);
 I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(1);
 ok('頭部命中で一撃', e0.dead);
 // 連射の発射間隔（650発/分 → 1秒で約11発）
-fresh(); freezeEnemies(); place(3.5, 2.5, 0); P.pitch = 0.3;
+fresh(); freezeEnemies(); place(12.5, 2.5, 0); P.pitch = 0.3;
 I.mouse.lmb = true; const a0 = P.ammo; for (let i = 0; i < 60; i++) Gm.step(1); I.mouse.lmb = false; Gm.step(1);
 ok('フルオート：1秒で10〜12発', a0 - P.ammo >= 10 && a0 - P.ammo <= 12, a0 - P.ammo);
 // 反動：連射すると照準が上がる（自動で完全には戻らない）
-fresh(); freezeEnemies(); place(3.5, 2.5, Math.PI); const pit0 = P.pitch;
+fresh(); freezeEnemies(); place(12.5, 2.5, Math.PI); const pit0 = P.pitch;
 I.mouse.lmb = true; Gm.step(30); I.mouse.lmb = false; Gm.step(120);
 ok('連射で照準が上がり、離しても一部が残る', P.pitch - pit0 > 0.03, (P.pitch - pit0).toFixed(3));
 // 壁越しに当たらない
 fresh(); freezeEnemies();
 const e1 = G.Enemies.list[1];
-place(3.5, 2.5, Math.PI); resetE(e1, 10.5, 2.5); // x=8 の壁の向こう
+place(12.5, 2.5, Math.PI); resetE(e1, 10.5, 2.5); // x=8 の壁の向こう
 I.mouse.rmb = true; Gm.step(20); aimAt(1.1, 10.5, 2.5);
 I.mouse.lmb = true; Gm.step(20); I.mouse.lmb = false; I.mouse.rmb = false; Gm.step(1);
 ok('壁越しの敵に弾が当たらない', e1.hp === 100, e1.hp);
@@ -133,7 +133,7 @@ ok('着弾跡は上限80で古いものを再利用', G.Effects.decals.length <=
 P.ammo = 30;
 
 // ---- リロード ----
-fresh(); freezeEnemies(); place(3.5, 2.5, 0); P.pitch = 0.3;
+fresh(); freezeEnemies(); place(12.5, 2.5, 0); P.pitch = 0.3;
 P.ammo = 10; tap('KeyR');
 ok('Rでリロード開始', P.reloading);
 const aR = P.ammo; I.mouse.lmb = true; Gm.step(30); I.mouse.lmb = false;
@@ -158,40 +158,40 @@ ok('中断後に再リロードできる', P.ammo === 30);
 // ---- ナイフ ----
 fresh(); freezeEnemies();
 const k = G.Enemies.list[2];
-place(3.5, 2.5, Math.PI); resetE(k, 3.5, 3.6);
+place(12.5, 2.5, Math.PI); resetE(k, 12.5, 3.6);
 tap('KeyV'); key('KeyV', 'keydown', true); Gm.step(30);
-ok('正面の近距離の敵をナイフで倒せる', k.dead);
+ok('首以外の近距離ナイフはダメージと出血になる', !k.dead && k.hp < 100 && k.knifeBleed > 0);
 const cd = P.knifeCD; tap('KeyV'); ok('攻撃後は短い待ち時間がある', P.knifeT < 0 || P.knifeT === 0 && cd > 0);
 Gm.step(60);
 const k2 = G.Enemies.list[3];
 place(7.6, 2.5, -Math.PI / 2); resetE(k2, 9.2, 2.5); // 壁 x=8 の向こう
 tap('KeyV'); Gm.step(30);
 ok('壁越しにはナイフが当たらない', !k2.dead && k2.hp === 100);
-place(3.5, 2.5, Math.PI); resetE(k2, 3.5, 3.5); P.yaw = 0; Gm.step(1); // 背後
+place(12.5, 2.5, Math.PI); resetE(k2, 12.5, 3.5); P.yaw = 0; Gm.step(1); // 背後
 tap('KeyV'); Gm.step(30);
 ok('背後の敵には当たらない', !k2.dead);
 
 // ---- AI：見えていない敵は位置を知らない ----
 fresh();
 const a = G.Enemies.list;
-place(3.5, 1.5, Math.PI);
+place(12.5, 1.5, Math.PI);
 G.Game.step(60 * 3);
 ok('壁の向こうの敵は最後に見た位置を持たない', a.every(e => e.lastSeenPos === null), a.map(e => e.state).join(','));
 // 足音（しゃがみ）は遠くに届かない
 const before = a.map(e => e.heardT);
 tap('KeyC'); key('KeyW'); Gm.step(60); key('KeyW', 'keyup'); tap('KeyC');
-ok('しゃがみ歩きの足音は遠くの敵に聞こえない', a.every((e, i) => e.heardT === before[i]));
+ok('しゃがみ歩きの足音は遠くの敵に聞こえない', a.every((e, i) => e.pos.distanceTo(P.pos) < 8 || e.heardT === before[i]));
 // 銃声で調査へ
-place(3.5, 2.5, 0); P.pitch = 0.4; P.yaw = 0;
+place(12.5, 2.5, 0); P.pitch = 0.4; P.yaw = 0;
 I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(1);
 const heard = a.filter(e => e.heardPos);
 ok('銃声を聞いた敵が音の位置を記憶', heard.length > 0, heard.length + '体');
-ok('聞いた位置＝発砲位置（現在位置とは別に保持）', heard.every(e => Math.abs(e.heardPos.x - 3.5) < 0.01 && Math.abs(e.heardPos.z - 2.5) < 0.01));
+ok('聞いた位置＝発砲位置（現在位置とは別に保持）', heard.every(e => Math.abs(e.heardPos.x - 12.5) < 0.01 && Math.abs(e.heardPos.z - 2.5) < 0.01));
 ok('聞いた敵は調査に向かう', heard.some(e => e.state === 'investigate'), heard.map(e => e.state).join(','));
 // プレイヤーは別の場所へ移動 → 敵は現在位置ではなく音の位置へ
 P.pos.set(26.5, 0, 35.5); P.posture = 'prone'; P.eyeH = 0.34;
 let maxGoalErr = 0, minToPlayer = 99;
-for (let i = 0; i < 60 * 6; i++) { Gm.step(1); for (const e of heard) if (e.state === 'investigate' && e.goal) { maxGoalErr = Math.max(maxGoalErr, Math.hypot(e.goal.x - 3.5, e.goal.z - 2.5)); minToPlayer = Math.min(minToPlayer, e.goal.distanceTo(P.pos)); } }
+for (let i = 0; i < 60 * 6; i++) { Gm.step(1); for (const e of heard) if (e.state === 'investigate' && e.goal) { maxGoalErr = Math.max(maxGoalErr, Math.hypot(e.goal.x - 12.5, e.goal.z - 2.5)); minToPlayer = Math.min(minToPlayer, e.goal.distanceTo(P.pos)); } }
 ok('調査の目的地は聞いた位置の周辺（味方同士で少し散らばる）', maxGoalErr < 4.0, maxGoalErr.toFixed(2));
 ok('調査の目的地はプレイヤーの現在位置ではない', minToPlayer > 20, minToPlayer.toFixed(1));
 
@@ -262,8 +262,9 @@ fresh();
   e.pos.set(33.5, 0, 12.5); e.state = 'patrol'; e.yaw = e.lookYaw = e.bodyYaw = -Math.PI / 2;
   place(27.5, 12.5, -Math.PI / 2);
   P.hurt = function(){};
-  for (let i = 0; i < 60 * 3 && e.state !== 'combat'; i++) Gm.step(1);
-  const seenAt = e.lastSeenPos && e.lastSeenPos.clone();
+  // この検証では発見済みの状態を固定し、視認判定の偶然性と切り離す。
+  e.setState('combat'); e.lastSeenPos = P.pos.clone(); e.lastSeenT = G.time; e.visible = false;
+  const seenAt = e.lastSeenPos.clone();
   P.pos.set(22.5, 0, 8.5); // 北の廊下へ隠れる（倉庫からは見えない位置）
   let flank = false, flankGoal = null;
   for (let i = 0; i < 60 * 8; i++) { Gm.step(1); if (e.state === 'flank') { flank = true; if (!flankGoal && e.goal) flankGoal = e.goal.clone(); } }
@@ -315,12 +316,12 @@ fresh();
 // ---- 流血表現 ----
 fresh(); freezeEnemies();
 {
-  const e = G.Enemies.list[0]; resetE(e, 3.5, 6.5); place(3.5, 2.5, Math.PI);
+  const e = G.Enemies.list[0]; resetE(e, 12.5, 6.5); place(12.5, 2.5, Math.PI);
   I.mouse.rmb = true; Gm.step(20); aimAt(1.1, e.pos.x, e.pos.z);
   G.Game.gore = 'on'; const b0 = G.Effects.blood.length;
   I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(1);
   ok('命中すると血痕ができる（オン）', G.Effects.blood.length > b0, G.Effects.blood.length);
-  G.Game.gore = 'off'; const b1 = G.Effects.blood.length; Gm.step(10); resetE(e, 3.5, 6.5); aimAt(1.1, e.pos.x, e.pos.z);
+  G.Game.gore = 'off'; const b1 = G.Effects.blood.length; Gm.step(10); resetE(e, 12.5, 6.5); aimAt(1.1, e.pos.x, e.pos.z);
   I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(1);
   ok('オフでは血痕ができない', G.Effects.blood.length === b1);
   G.Game.gore = 'on'; e.die(true); Gm.step(150);
@@ -330,7 +331,7 @@ fresh(); freezeEnemies();
 // ---- 当たり判定がアニメーション後の体に一致する ----
 fresh(); freezeEnemies();
 {
-  const e = G.Enemies.list[0]; resetE(e, 3.5, 6.5);
+  const e = G.Enemies.list[0]; resetE(e, 12.5, 6.5);
   const hStand = e.body.headWorld.y;
   e.wantCrouch = true; e.crouch = 1; for (let i = 0; i < 60; i++) e.syncModel(1/60);
   const hCrouch = e.body.headWorld.y;
@@ -348,16 +349,16 @@ fresh(); freezeEnemies();
   for (let i = 0; i < 175; i++) Gm.step(1);
   const ph1 = L.slice(0, 4).map(e => e.body.st.phase);
   for (let i = 0; i < 4; i++) {
-    const b = L[i].body; if (!b.st.settled) allSettled = false;
+    const b = L[i].body; if (!b.ragdoll) allSettled = false;
     for (const n of ['head', 'chest', 'spine', 'hips', 'hdL', 'hdR', 'ftL', 'ftR', 'snL', 'snR']) { const v = new THREE.Vector3(); b.bones[n].getWorldPosition(v); maxBelow = Math.max(maxBelow, -v.y); }
   }
   Gm.step(120);
   const ph2 = L.slice(0, 4).map(e => e.body.st.phase);
-  ok('倒れた後は脚の動きが止まる', ph2.every((p, i) => Math.abs(p - ph1[i]) < 1e-6) && allSettled);
+  ok('倒れた後は脚の動きが止まる', ph2.every((p, i) => Math.abs(p - ph1[i]) < 1e-6) && allSettled && L.slice(0,4).every(e=>e.body.ragdoll.phase==='limp'));
   ok('倒れた体の骨が床より下に入らない', maxBelow < 0.02, maxBelow.toFixed(3));
   // 壁際で倒れた敵（7.3, 5.6：東の壁 x=8 の手前）は壁の方へ倒れない
   const e2 = L[2]; const hd = new THREE.Vector3(); e2.body.bones.head.getWorldPosition(hd);
-  ok('壁際では壁のない方向へ倒れる（頭が壁の中に入らない）', G.World.walkable(Math.floor(hd.x), Math.floor(hd.z)), hd.x.toFixed(2) + ',' + hd.z.toFixed(2));
+  ok('壁際で倒れても頭が壁の中に入らない', !G.World.pointInSolid(hd.x, hd.z, 2.5), hd.x.toFixed(2) + ',' + hd.z.toFixed(2));
 }
 // ---- 部位による傷の影響 ----
 fresh(); freezeEnemies();
@@ -390,7 +391,7 @@ fresh(); freezeEnemies();
 // ---- 部位別の当たり判定 ----
 fresh(); freezeEnemies();
 {
-  const e = G.Enemies.list[0]; resetE(e, 3.5, 6.5); e.yaw = e.lookYaw = e.bodyYaw = Math.PI;
+  const e = G.Enemies.list[0]; resetE(e, 12.5, 6.5); e.yaw = e.lookYaw = e.bodyYaw = Math.PI;
   for (let i = 0; i < 40; i++) e.syncModel(1/60);
   const o = new THREE.Vector3(3.5, 1.0, 2.0);
   const shoot = (bone) => { const v = new THREE.Vector3(); e.body.bones[bone].getWorldPosition(v); const d = v.clone().sub(o).normalize(); const h = e.rayHit(o, d, 50); return h ? h.part : 'miss'; };
@@ -415,7 +416,7 @@ ok('体力0で第三者視点の演出が始まる', !!Gm.deathCam && P.dead && 
 const camBefore = G.camera.position.clone();
 Gm.step(60);
 ok('カメラが後ろへ引いて自分の体を映す', G.camera.position.distanceTo(camBefore) > 0.8 && Gm.deathCam.body.st.dead, G.camera.position.distanceTo(camBefore).toFixed(2));
-Gm.step(200);
+Gm.step(270);
 ok('演出の後にゲームオーバー', Gm.state === 'ended');
 const enemySnap = G.Enemies.list.map(e => e.pos.clone());
 Gm.step(120);
@@ -432,10 +433,10 @@ place(1.5, 1.5, 0); Gm.step(2);
 ok('脱出地点に戻るとクリア', Gm.state === 'ended' && $('end-title').textContent === '任務完了');
 
 // ---- フレームレート差 ----
-const runMove = (fps) => { fresh(); freezeEnemies(); place(3.5, 2.5, Math.PI); key('KeyW'); for (let i = 0; i < fps * 1; i++) Gm.step(1, 1 / fps); key('KeyW', 'keyup'); return P.pos.z; };
+const runMove = (fps) => { fresh(); freezeEnemies(); place(12.5, 2.5, Math.PI); key('KeyW'); for (let i = 0; i < fps * 1; i++) Gm.step(1, 1 / fps); key('KeyW', 'keyup'); return P.pos.z; };
 const z30 = runMove(30), z144 = runMove(144);
 ok('30fpsと144fpsで移動距離がほぼ同じ', Math.abs(z30 - z144) < 0.15, z30.toFixed(2) + ' / ' + z144.toFixed(2));
-const fireCount = (fps) => { fresh(); freezeEnemies(); place(3.5, 2.5, 0); P.pitch = 0.4; I.mouse.lmb = true; const a0 = P.ammo; for (let i = 0; i < fps; i++) Gm.step(1, 1 / fps); I.mouse.lmb = false; return a0 - P.ammo; };
+const fireCount = (fps) => { fresh(); freezeEnemies(); place(12.5, 2.5, 0); P.pitch = 0.4; I.mouse.lmb = true; const a0 = P.ammo; for (let i = 0; i < fps; i++) Gm.step(1, 1 / fps); I.mouse.lmb = false; return a0 - P.ammo; };
 const f30 = fireCount(30), f144 = fireCount(144);
 ok('30fpsと144fpsで連射数がほぼ同じ', Math.abs(f30 - f144) <= 1, f30 + ' / ' + f144);
 

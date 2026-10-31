@@ -267,6 +267,17 @@
     for (const [x0, z0, x1, z1] of WOOD[id]) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) if (rows[z] && rows[z][x] === '#') rows[z][x] = 'W';
     MAPS[id].rows = rows.map(r => r.join(''));
   }
+  // Each insertion starts behind an indestructible dogleg screen, with an exit along the left edge.
+  for (const def of Object.values(MAPS)) {
+    const rows = def.rows.map(row => row.split(''));
+    const pz = rows.findIndex(row => row.includes('P'));
+    for (let z = Math.max(1,pz-2); z <= Math.min(rows.length-2,pz+2); z++) {
+      rows[z][5] = '#';
+      if (rows[z][1] !== 'X') rows[z][1] = '.';
+      if (z === pz-2 || z === pz+2) for(let x=2;x<=5;x++) rows[z][x]='#';
+    }
+    def.rows = rows.map(row => row.join(''));
+  }
   const MAP_ID = (G.Storage && MAPS[G.Storage.get('cq_map_v1')]) ? G.Storage.get('cq_map_v1') : 'facility';
   const DEF = MAPS[MAP_ID];
   const MAP = DEF.rows;
@@ -350,22 +361,73 @@
     }
   }
   World.boxes = function (x, z) {
+    const damaged = G.Destruction?.cells.get(x + ',' + z);
+    if (damaged) return damaged.boxes;
     if (x < 0 || z < 0 || x >= W || z >= H) return [{ b: [x, 0, z, x + 1, CEIL, z + 1], skip: {} }];
     return BOXES[z][x];
   };
   // 体の高さの範囲 [0.05, bodyH] と重なる箱だけを返す
-  function bodyBoxes(x, z, bodyH) {
+  function bodyBoxes(x, z, bodyH, feetY = 0) {
     const out = [];
-    for (const o of World.boxes(x, z)) if (o.b[1] < bodyH && o.b[4] > 0.05) out.push(o.b);
+    for (const o of World.boxes(x, z)) if (o.b[1] < feetY + bodyH - 1e-6 && o.b[4] > feetY + 0.05) out.push(o.b);
     return out;
   }
   // 点が（体の高さで）壁の中か
-  World.pointInSolid = function (px, pz, bodyH) {
-    for (const b of bodyBoxes(Math.floor(px), Math.floor(pz), bodyH)) if (px > b[0] && px < b[3] && pz > b[2] && pz < b[5]) return true;
+  World.pointInSolid = function (px, pz, bodyH, feetY = 0) {
+    for (const b of bodyBoxes(Math.floor(px), Math.floor(pz), bodyH, feetY)) if (px > b[0] && px < b[3] && pz > b[2] && pz < b[5]) return true;
     return false;
   };
   // 敵の経路探索で歩けるセル（立ったまま通れる）
   World.walkable = function (x, z) { return !SOLID[World.cell(x, z)]; };
+  // ---- 木箱：描画と、壊れたときのマス目の書き換え ----
+  // やり直したときに、壊れた木箱を元に戻す
+  const ORIG = grid.map(r => r.slice());
+  World.resetCrates = function () {
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+      const o = ORIG[z][x];
+      if ((o === 'b' || o === 'B') && grid[z][x] !== o) World.setCell(x, z, o);
+    }
+  };
+  const _cm = new THREE.Matrix4(), _cq = new THREE.Quaternion(), _cs = new THREE.Vector3(), _cp = new THREE.Vector3(), _cy = new THREE.Vector3(0, 1, 0);
+  World.buildCrate = function (x, z) {
+    const slots = World.crateSlots && World.crateSlots.get(x + ',' + z); if (!slots) return;
+    const c = grid[z][x];
+    const layers = c === 'B' ? [[0, 1.0], [1.0, 2.0]] : c === 'b' ? [[0, 1.25]] : [];
+    for (let i = 0; i < 2; i++) {
+      const L = layers[i];
+      if (!L) { _cm.makeScale(0, 0, 0); World.crateIM.setMatrixAt(slots[i], _cm); continue; }
+      _cq.setFromAxisAngle(_cy, ((x * 7 + z * 3 + L[0] * 5) % 4) * Math.PI / 2);   // 向きを少しずつ変えて同じ見た目が並ばないように
+      _cm.compose(_cp.set(x + 0.5, (L[0] + L[1]) / 2, z + 0.5), _cq, _cs.set(0.98, L[1] - L[0] - 0.01, 0.98));
+      World.crateIM.setMatrixAt(slots[i], _cm);
+    }
+    World.crateIM.instanceMatrix.needsUpdate = true;
+  };
+  // マス目を書き換える（当たり判定・弾・視線・物理・敵の遮蔽物の一覧に反映）
+  World.setCell = function (x, z, c) {
+    if (x < 0 || z < 0 || x >= W || z >= H) return;
+    grid[z][x] = c;
+    const r = SOLID[c];
+    BOXES[z][x] = r && THIN[c] === undefined ? [{ b: [x, r[0], z, x + 1, r[1], z + 1], skip: {} }] : (r ? BOXES[z][x] : []);
+    World.buildCrate(x, z);
+    if (G.Physics) G.Physics.replaceCell(x, z);
+    if (G.Enemies && G.Enemies.invalidateCover) G.Enemies.invalidateCover();
+  };
+  // 爆風で木箱が壊れる：近いほど大きく壊れる（背の高い箱は上の段が飛ぶ、低い箱は砕ける）
+  World.blastCrates = function (c, radius) {
+    const out = [];
+    for (let z = Math.floor(c.z - radius); z <= Math.floor(c.z + radius); z++) for (let x = Math.floor(c.x - radius); x <= Math.floor(c.x + radius); x++) {
+      const cc = World.cell(x, z); if (cc !== 'b' && cc !== 'B') continue;
+      const nx = Math.max(x, Math.min(c.x, x + 1)), nz = Math.max(z, Math.min(c.z, z + 1));
+      const d = Math.hypot(nx - c.x, nz - c.z);
+      if (d > radius) continue;
+      const strong = d < radius * 0.45;
+      const next = cc === 'B' ? (strong ? '.' : 'b') : (strong || Math.random() < 0.5 ? '.' : 'b');
+      if (next === cc) continue;
+      World.setCell(x, z, next);
+      out.push({ x, z, from: cc, to: next, d });
+    }
+    return out;
+  };
   World.isExit = function (px, pz) { return World.cell(Math.floor(px), Math.floor(pz)) === 'X'; };
 
   // ---- 円（XZ平面）と箱の衝突 ----
@@ -376,11 +438,18 @@
   }
   World.blocksBody = blocksBody;
 
-  World.overlapsSolid = function (px, pz, radius, bodyH) {
+  // Camera collision is a sphere: ledges must not switch abruptly at a cylinder's flat bottom.
+  World.overlapsSphere = function(px,py,pz,radius){
+    for(let z=Math.floor(pz-radius);z<=Math.floor(pz+radius);z++)for(let x=Math.floor(px-radius);x<=Math.floor(px+radius);x++)for(const {b} of World.boxes(x,z)){
+      const dx=px-Math.max(b[0],Math.min(px,b[3])),dy=py-Math.max(b[1],Math.min(py,b[4])),dz=pz-Math.max(b[2],Math.min(pz,b[5]));
+      if(dx*dx+dy*dy+dz*dz<radius*radius-1e-6)return true;
+    }return false;
+  };
+  World.overlapsSolid = function (px, pz, radius, bodyH, feetY = 0) {
     const x0 = Math.floor(px - radius), x1 = Math.floor(px + radius);
     const z0 = Math.floor(pz - radius), z1 = Math.floor(pz + radius);
     for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
-      for (const b of bodyBoxes(x, z, bodyH)) {
+      for (const b of bodyBoxes(x, z, bodyH, feetY)) {
         const cx = Math.max(b[0], Math.min(px, b[3]));
         const cz = Math.max(b[2], Math.min(pz, b[5]));
         const dx = px - cx, dz = pz - cz;
@@ -391,11 +460,11 @@
   };
 
   // 位置 pos(THREE.Vector3 か {x,z}) を移動して壁から押し出す
-  function legacyMove(pos, mx, mz, radius, bodyH) {
+  function legacyMove(pos, mx, mz, radius, bodyH, feetY = 0) {
     pos.x += mx; pos.z += mz;
     for (let it = 0; it < 4; it++) {
       const x0 = Math.floor(pos.x - radius), x1 = Math.floor(pos.x + radius), z0 = Math.floor(pos.z - radius), z1 = Math.floor(pos.z + radius);
-      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) for (const bx of bodyBoxes(x, z, bodyH)) {
+      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) for (const bx of bodyBoxes(x, z, bodyH, feetY)) {
         const cx = Math.max(bx[0], Math.min(pos.x, bx[3])), cz = Math.max(bx[2], Math.min(pos.z, bx[5]));
         let dx = pos.x - cx, dz = pos.z - cz, d = Math.hypot(dx, dz);
         if (d >= radius) continue;
@@ -409,12 +478,12 @@
   // 体の中心が壁の箱に入ると「一番近い面の外へ」大きく押し出すしかなくなり、一瞬で位置が飛んでしまう。
   // そこで ①細かく分けて動かし、②軸ごとに動かして中心が箱に入る成分はその場で止め、
   // ③押し出しで中心が別の箱に入るならその押し出しは取り消す、という手順で、中心が箱に入らないようにする。
-  World.moveCircle = function (pos, mx, mz, radius, bodyH) {
-    const inside = (x, z) => World.pointInSolid(x, z, bodyH);
+  World.moveCircle = function (pos, mx, mz, radius, bodyH, feetY = 0) {
+    const inside = (x, z) => World.pointInSolid(x, z, bodyH, feetY);
     const steps = Math.max(1, Math.ceil(Math.hypot(mx, mz) / (radius * 0.5)));
     const sx = mx / steps, sz = mz / steps;
     // 万一すでに中心が箱の中にいる（姿勢を変えた直後など）なら、外へ出られるよう従来の押し出しを使う
-    if (inside(pos.x, pos.z)) { legacyMove(pos, mx, mz, radius, bodyH); return; }
+    if (inside(pos.x, pos.z)) { legacyMove(pos, mx, mz, radius, bodyH, feetY); return; }
     for (let s = 0; s < steps; s++) {
       const px = pos.x, pz = pos.z;
       pos.x += sx; if (inside(pos.x, pos.z)) pos.x = px;
@@ -423,7 +492,7 @@
         let pushed = false;
         const x0 = Math.floor(pos.x - radius), x1 = Math.floor(pos.x + radius);
         const z0 = Math.floor(pos.z - radius), z1 = Math.floor(pos.z + radius);
-        for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) for (const bx of bodyBoxes(x, z, bodyH)) {
+        for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) for (const bx of bodyBoxes(x, z, bodyH, feetY)) {
           const cx = Math.max(bx[0], Math.min(pos.x, bx[3]));
           const cz = Math.max(bx[2], Math.min(pos.z, bx[5]));
           const dx = pos.x - cx, dz = pos.z - cz;
@@ -440,6 +509,27 @@
       // 万一それでも中心が箱の中なら、この一歩は動かなかったことにする
       if (inside(pos.x, pos.z)) { pos.x = px; pos.z = pz; }
     }
+  };
+
+  // 垂直移動は足と頭の移動区間で判定する。低い箱への着地、天井、段差からの落下にも対応。
+  World.moveVertical = function (pos, dy, radius, bodyH) {
+    const oldY = pos.y, nextY = oldY + dy;
+    let floor = 0, ceiling = OUT ? Infinity : CEIL;
+    for (let z = Math.floor(pos.z - radius); z <= Math.floor(pos.z + radius); z++) {
+      for (let x = Math.floor(pos.x - radius); x <= Math.floor(pos.x + radius); x++) {
+        for (const { b } of World.boxes(x, z)) {
+          const dx = pos.x - Math.max(b[0], Math.min(pos.x, b[3]));
+          const dz = pos.z - Math.max(b[2], Math.min(pos.z, b[5]));
+          if (dx * dx + dz * dz >= radius * radius - 1e-6) continue;
+          if (b[4] <= oldY + 1e-5) floor = Math.max(floor, b[4]);
+          if (b[1] >= oldY + bodyH - 1e-5) ceiling = Math.min(ceiling, b[1]);
+        }
+      }
+    }
+    const grounded = dy <= 0 && nextY <= floor;
+    const hitCeiling = dy > 0 && nextY + bodyH >= ceiling;
+    pos.y = grounded ? floor : hitCeiling ? Math.max(oldY, ceiling - bodyH) : nextY;
+    return { grounded, hitCeiling };
   };
 
   // ---- レイキャスト（グリッドDDA＋箱の交差判定、床と天井を含む） ----
@@ -517,7 +607,7 @@
       }
       const pin = { x: h.x, y: h.y, z: h.z, nx: h.nx, ny: h.ny, nz: h.nz };
       const pout = { x: sx + dx * tOut, y: sy + dy * tOut, z: sz + dz * tOut, nx: -h.nx, ny: -h.ny, nz: -h.nz };
-      woods.push({ t: traveled + h.t, tOut: traveled + tOut, in: pin, out: pout });
+      woods.push({ cx: h.cx, cz: h.cz, t: traveled + h.t, tOut: traveled + tOut, in: pin, out: pout });
       traveled += tOut + 0.01;
       sx = ox + dx * traveled; sy = oy + dy * traveled; sz = oz + dz * traveled;
       if (traveled >= maxDist) return { hit: null, woods };
@@ -944,7 +1034,7 @@
     // 箱ごとに面を作る（薄い壁は柱と腕に分かれているので、つながっている内側の面は省く）
     for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
       const c = grid[z][x];
-      if (!SOLID[c] || c === 'c' || c === 'r' || c === 'd') continue;   // 車・がれき・机やベッドは別の形で作る
+      if (!SOLID[c] || c === 'W' || c === 'c' || c === 'r' || c === 'd' || c === 'b' || c === 'B') continue;   // 車・がれき・机やベッド・木箱は別の形で作る
       const a = get(wallMaterialKey(x, z, c));
       for (const o of World.boxes(x, z)) {
         const [bx0, y0, bz0, bx1, y1, bz1] = o.b, k = o.skip;
@@ -975,6 +1065,14 @@
       lowwall: new THREE.MeshStandardMaterial({ map: TEX.concrete, bumpMap: TEX.concreteBump, bumpScale: 0.015, roughness: 0.92 }),
     };
     World.staticMeshes = [];
+    // 木箱：1つずつ別の形（手りゅう弾で壊れる）。背の高い木箱は2段積み
+    // 木箱：全部まとめて1回で描く（同じ形を並べる方式）。壊れた箱はその分だけ消す
+    World.crateMat = mats.crate; World.scene = scene; World.crateSlots = new Map();
+    let n = 0; for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) if (grid[z][x] === 'b' || grid[z][x] === 'B') { World.crateSlots.set(x + ',' + z, [n, n + 1]); n += 2; }
+    World.crateIM = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mats.crate, Math.max(1, n));
+    World.crateIM.castShadow = World.crateIM.receiveShadow = true; World.crateIM.frustumCulled = false;
+    scene.add(World.crateIM);
+    for (const k of World.crateSlots.keys()) { const [x, z] = k.split(',').map(Number); World.buildCrate(x, z); }
     for (const k in geo) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(geo[k].pos, 3));

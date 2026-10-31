@@ -1,0 +1,42 @@
+[
+  {
+    "asset": "hurt-1.wav",
+    "source": "3grunt1.wav",
+    "trimStart": 0.5088,
+    "duration": 0.4043,
+    "peak": 0.5846,
+    "sha256": "57b3a59c39ffe74a1706bcb85c451443c3b388d1f6423827b2af4af508c8416b"
+  },
+  {
+    "asset": "hurt-2.wav",
+    "source": "3grunt2.wav",
+    "trimStart": 0.2693,
+    "duration": 0.6737,
+    "peak": 0.8092,
+    "sha256": "a377c43f2151000713a45c18223c94e1de2e2393ad10569a391c1b9f96898544"
+  },
+  {
+    "asset": "hurt-3.wav",
+    "source": "3grunt3.wav",
+    "trimStart": 0.0,
+    "duration": 0.499,
+    "peak": 0.7503,
+    "sha256": "6006516ae7979896a4053cfc88f26ef575a67133fa0c51de5d9a893498960cc9"
+  },
+  {
+    "asset": "hurt-4.wav",
+    "source": "3grunt4.wav",
+    "trimStart": 0.2444,
+    "duration": 0.2556,
+    "peak": 0.84,
+    "sha256": "4ba97adf030acefa10195f88c3fb329ebbea2c9638bd412896e1b4fc0ca35404"
+  },
+  {
+    "asset": "death-1.wav",
+    "source": "3yell9.wav",
+    "trimStart": 0.3541,
+    "duration": 1.6415,
+    "peak": 0.5464,
+    "sha256": "f9c63c26c2dafb9c0dd0859c56c79c9012faf32bf2defdc8b53b19ed23ad0704"
+  }
+]

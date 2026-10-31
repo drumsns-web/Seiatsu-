@@ -112,8 +112,22 @@
         const dmg = 170 * Math.pow(1 - d / RADIUS, 1.2) * (exposure / pts.length);
         if (dmg < 3) continue;
         const killed = e.damage(dmg, 'body', c, 0);
+        if (killed && d < 2.2 && G.Game.dismember && Math.random() < 0.6) {
+          const r = Math.random(), part = r < 0.45 ? 'legs' : r < 0.85 ? 'arms' : 'head';
+          e.body.st.sever = { part, side: Math.random() < 0.5 ? 1 : -1, fore: Math.random() < 0.5, dir: t.clone().sub(c).setY(0.2).normalize() };
+        }
         if (killed) { P.kills++; G.HUD.hitmarker(false, true); }
         G.Effects.bloodHit(t, t.clone().sub(c).normalize(), true);
+      }
+      // 仲間も巻き込まれる
+      for (const al of (G.Allies ? G.Allies.list : [])) {
+        if (al.dead) continue;
+        const pts = al.visPoints(), d = pts[1].distanceTo(c);
+        if (d > RADIUS) continue;
+        const ex = pts.reduce((s, q) => { const n = G.World.woodLayersBetween(c.x, c.y, c.z, q.x, q.y, q.z); return s + (n < 0 ? 0 : Math.pow(0.5, n)); }, 0);
+        if (ex <= 0) continue;
+        const dmg = 150 * Math.pow(1 - d / RADIUS, 1.2) * (ex / pts.length) * (al.crippled ? 0.6 : 1);
+        if (dmg >= 2) al.hurt(dmg, c, Math.random() < 0.5 ? 'leg' : 'torso');
       }
       // 自分（伏せ・しゃがみ・遮蔽物で被害が減る）
       if (!P.dead && G.Game.state === 'playing') {
@@ -125,6 +139,13 @@
           if (dmg >= 2) P.hurt(dmg, c);
         }
         P.shake = Math.max(P.shake || 0, Math.max(0, 1 - d / 18));
+      }
+      // 爆風で近くの木の壁に穴が開き、木箱が壊れる
+      const broken = G.Destruction.blast(c, 2.8);
+      for (const k of G.World.blastCrates(c, 2.4)) {
+        const at = new THREE.Vector3(k.x + 0.5, k.to === 'b' ? 1.5 : 0.6, k.z + 0.5);
+        G.Physics.splinters(at, at.clone().sub(c).setY(0).normalize());
+        G.Audio.woodBreak && G.Audio.woodBreak(at);
       }
       const near = Math.max(0, 1 - c.distanceTo(cam.position) / 10);
       G.Effects.explosion(c);

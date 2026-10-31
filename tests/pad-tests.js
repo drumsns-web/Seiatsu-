@@ -6,16 +6,18 @@
   navigator.getGamepads = () => [pad];
   const press = (i, on) => { pad.buttons[i] = { pressed: on, value: on ? 1 : 0 }; };
   Gm.reset(); Gm.state = 'menu'; G.Input.enabled = false;
-  Gm.testMode = false; Gm.begin(); Gm.testMode = true;
+  Gm.testMode = false; Gm.loadoutReady = false; Gm.begin();
+  ok('コントローラーでも装備を選んでから出撃', document.getElementById('panel-loadout').classList.contains('on'));
+  document.getElementById('btn-deploy').click(); Gm.testMode = true;
   ok('コントローラー接続時はマウスを固定せずに開始できる', Gm.state === 'playing' && G.Input.enabled);
   G.Enemies.list.forEach(e => { e.update = function (dt) { this.syncModel(dt); }; e.pos.set(45 + e.id * 0.8, 0, 37.5); });
-  P.pos.set(3.5, 0, 2.5); P.yaw = Math.PI; P.pitch = 0; Gm.step(2);
+  P.pos.set(12.5, 0, 2.5); P.yaw = Math.PI; P.pitch = 0; Gm.step(2);
   // 左スティックで移動
   pad.axes = [0, -1, 0, 0]; Gm.step(60); pad.axes = [0, 0, 0, 0]; Gm.step(10);
   ok('左スティックで前進', P.pos.z > 4.5, P.pos.z.toFixed(2));
   pad.axes = [0, -0.45, 0, 0]; const z0 = P.pos.z; Gm.step(30); pad.axes = [0, 0, 0, 0]; Gm.step(10);
   const half = P.pos.z - z0;
-  P.pos.set(3.5, 0, 2.5); Gm.step(2);
+  P.pos.set(12.5, 0, 2.5); Gm.step(2);
   ok('スティックを浅く倒すとゆっくり歩く', half > 0.1 && half < 1.4, half.toFixed(2) + 'm/0.5秒');
   // 右スティックで視点
   const y0 = P.yaw; pad.axes = [0, 0, 1, 0]; Gm.step(30); pad.axes = [0, 0, 0, 0]; Gm.step(2);
@@ -42,8 +44,8 @@
   // エイム補助：照準の少し横に敵 → 右スティックを少し動かすと敵の方へ寄る（オフでは寄らない）
   const trial = (on) => {
     Pad.settings.assist = on;
-    P.pos.set(3.5, 0, 1.5); P.yaw = Math.PI; P.pitch = 0; P.recoil = 0; P.vel.set(0, 0, 0);
-    const e = G.Enemies.list[0]; e.pos.set(3.1, 0, 5.5); e.state = 'patrol'; e.hp = 100; for (let i = 0; i < 20; i++) e.syncModel(1 / 60);
+    P.pos.set(12.5, 0, 1.5); P.yaw = Math.PI; P.pitch = 0; P.recoil = 0; P.vel.set(0, 0, 0);
+    const e = G.Enemies.list[0]; e.pos.set(12.1, 0, 5.5); e.state = 'patrol'; e.hp = 100; for (let i = 0; i < 20; i++) e.syncModel(1 / 60);
     Gm.step(2);
     // 敵とは逆向き（右）へ、ごくゆっくり視点を動かす
     const base = P.yaw; pad.axes = [0, 0, 0.35, 0]; Gm.step(40); pad.axes = [0, 0, 0, 0];

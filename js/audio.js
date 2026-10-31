@@ -1,7 +1,20 @@
-// ===== 音（すべてWeb Audio APIで合成。外部音源は未使用） =====
+// ===== 音（効果音は合成、プレイヤーと敵の声はCC0の人間の録音） =====
 'use strict';
 (function () {
   const G = window.G;
+  // Ten stable enemy timbres from the recorded human shouts. Each actor keeps one voice.
+  const ENEMY_VOICE_PROFILES = [
+    { rate: .83, eq: -3, hz: 850, top: 3600 },
+    { rate: .87, eq: 3, hz: 1150, top: 4500 },
+    { rate: .91, eq: -5, hz: 1700, top: 3900 },
+    { rate: .95, eq: 4, hz: 2300, top: 5900 },
+    { rate: .99, eq: -2, hz: 1250, top: 5200 },
+    { rate: 1.03, eq: 5, hz: 1450, top: 6500 },
+    { rate: 1.07, eq: -4, hz: 2100, top: 4700 },
+    { rate: 1.11, eq: 3, hz: 3200, top: 7000 },
+    { rate: 1.15, eq: -2, hz: 650, top: 5600 },
+    { rate: 1.19, eq: 4, hz: 850, top: 7200 },
+  ];
   const A = G.Audio = {
     ctx: null, master: null, reverb: null, reverbSend: null, voices: 0, MAX_VOICES: 48,
     ok: false,
@@ -16,14 +29,24 @@
       this.master = c.createGain(); this.master.gain.value = 0.8;
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -14; comp.knee.value = 8; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.15;
-      this.master.connect(comp); comp.connect(c.destination);
-      // 室内の残響（生成したインパルス応答）
+      this.master.connect(comp);
+      // Automated QA exercises real audio nodes without sending sound to the speakers.
+      this.outputMutedForTest = /[?&]autotest(?:&|$)/.test(location.search);
+      if (!this.outputMutedForTest) comp.connect(c.destination);
+      // 短い室内反射と、広い場所でだけ聞こえる弱い残響。
       this.reverb = c.createConvolver();
-      this.reverb.buffer = this.makeImpulse(1.1, 2.6);
-      this.reverbSend = c.createGain(); this.reverbSend.gain.value = 0.32;
+      this.reverb.buffer = this.makeImpulse(0.62, 3.2);
+      this.reverbSend = c.createGain(); this.reverbSend.gain.value = 0.08;
       this.reverbSend.connect(this.reverb); this.reverb.connect(this.master);
+      this.hallReverb = c.createConvolver(); this.hallReverb.buffer = this.makeImpulse(1.3, 3.5);
+      this.hallSend = c.createGain(); this.hallSend.gain.value = 0.025;
+      this.hallSend.connect(this.hallReverb); this.hallReverb.connect(this.master);
       this.noise = this.makeNoise(2);
+      this.startAmbience();
       this.ok = true;
+      this.preparePlayerVoice();
+      this.prepareRadioVoices();
+      this.prepareSurfaceSteps();
       this.prepare();
     },
     // 音声の器（再生前でも作れる方法を優先。ページを開いた直後の空き時間に声と足音を作っておく）
@@ -67,6 +90,47 @@
         l.setPosition(p.x, p.y, p.z); l.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z);
       }
       (this.listenerPos || (this.listenerPos = new THREE.Vector3())).copy(p);
+      this.updateAcoustics(p);
+      for (const item of this.followingVoices || []) {
+        const at = item.follow();
+        if (!at) { try { item.source?.stop(); } catch (_) { } this.followingVoices.delete(item); continue; }
+        if (item.panner.positionX) { item.panner.positionX.value = at.x; item.panner.positionY.value = at.y; item.panner.positionZ.value = at.z; }
+        else item.panner.setPosition(at.x, at.y, at.z);
+        const blocked = !G.World.lineOfSight(p.x, p.y, p.z, at.x, at.y, at.z);
+        item.filter.frequency.setTargetAtTime(blocked ? 850 : 12000, this.ctx.currentTime, 0.04);
+        item.gain.gain.setTargetAtTime(item.base * (blocked ? 0.42 : 1), this.ctx.currentTime, 0.04);
+      }
+    },
+
+    acousticAt(p) {
+      const w = G.World, x = Math.floor(p.x), z = Math.floor(p.z);
+      if (w.outdoor) return { room: 0.045, hall: 0.02, ambience: 'wind' };
+      let walls = 0;
+      for (const [dx, dz] of [[2, 0], [-2, 0], [0, 2], [0, -2], [4, 0], [-4, 0], [0, 4], [0, -4]])
+        if (w.solidRange(x + dx, z + dz)) walls++;
+      const enclosed = walls / 8;
+      return { room: 0.075 + enclosed * 0.095, hall: 0.025 + (1 - enclosed) * 0.065, ambience: 'vent' };
+    },
+    updateAcoustics(p) {
+      const a = this.acousticAt(p), t = this.ctx.currentTime;
+      this.reverbSend.gain.setTargetAtTime(a.room, t, 0.18);
+      this.hallSend.gain.setTargetAtTime(a.hall, t, 0.25);
+      this.windGain.gain.setTargetAtTime(this.ambientEnabled && a.ambience === 'wind' ? 0.018 : 0, t, 0.35);
+      this.ventGain.gain.setTargetAtTime(this.ambientEnabled && a.ambience === 'vent' ? 0.012 : 0, t, 0.35);
+    },
+    ambience(active) {
+      this.ambientEnabled = !!active;
+      if (!active && this.ctx) for (const g of [this.windGain, this.ventGain]) g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2);
+    },
+    startAmbience() {
+      const c = this.ctx;
+      const layer = (type, freq) => {
+        const src = c.createBufferSource(), filter = c.createBiquadFilter(), gain = c.createGain();
+        src.buffer = this.noise; src.loop = true; filter.type = type; filter.frequency.value = freq; gain.gain.value = 0;
+        src.connect(filter); filter.connect(gain); gain.connect(this.master); src.start(); return gain;
+      };
+      this.windGain = layer('lowpass', 350);
+      this.ventGain = layer('bandpass', 115);
     },
 
     // 出力先を作る。pos があれば位置音（HRTF）、壁で遮られていれば音量を下げて高音を削る
@@ -80,7 +144,7 @@
       if (pos) {
         let occluded = false;
         if (this.listenerPos) occluded = !G.World.lineOfSight(this.listenerPos.x, this.listenerPos.y, this.listenerPos.z, pos.x, pos.y, pos.z);
-        if (occluded) {
+        if (occluded && !opts.follow) {
           g.gain.value = gain * 0.42;
           const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 850; lp.Q.value = 0.5;
           g.connect(lp); last = lp;
@@ -90,15 +154,24 @@
         p.refDistance = opts.ref || 1.5; p.rolloffFactor = opts.rolloff || 1.1; p.maxDistance = 200;
         if (p.positionX) { p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z; }
         else p.setPosition(pos.x, pos.y, pos.z);
-        last.connect(p); last = p;
+        if (opts.follow) {
+          const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = occluded ? 850 : 12000;
+          last.connect(lp); lp.connect(p);
+          g.gain.value = gain * (occluded ? 0.42 : 1);
+          const item = { panner: p, filter: lp, gain: g, base: gain, follow: opts.follow };
+          (this.followingVoices || (this.followingVoices = new Set())).add(item);
+          g.followItem = item;
+        } else last.connect(p);
+        last = p;
       }
       last.connect(this.master);
       if (opts.reverb !== 0) {
-        const s = c.createGain(); s.gain.value = opts.reverb || 0.6; last.connect(s); s.connect(this.reverbSend);
+        const s = c.createGain(); s.gain.value = opts.reverb ?? 0.6; last.connect(s); s.connect(this.reverbSend);
+        const h = c.createGain(); h.gain.value = (opts.reverb ?? 0.6) * 0.5; last.connect(h); h.connect(this.hallSend);
       }
       this.voices++;
       const life = opts.life || 1.2;
-      setTimeout(() => { this.voices--; try { g.disconnect(); } catch (e) { } }, life * 1000 + 200);
+      setTimeout(() => { this.voices--; if (g.followItem) this.followingVoices?.delete(g.followItem); try { g.disconnect(); } catch (e) { } }, life * 1000 + 200);
       return g;
     },
 
@@ -157,6 +230,20 @@
       this.noiseBurst(d, t + 0.02, 0.5, 'lowpass', 420, 0.4, 0.25, 0.01);   // 尾
       if (isPlayer) this.noiseBurst(d, t, 0.025, 'highpass', 5000, 0.8, 0.35, 0.001); // 機関部の金属音
     },
+    casingHit(pos, kind, surface, speed, bounce) {
+      if (!this.ok || speed < .45) return;
+      const soft = surface === 'carpet' || surface === 'grass';
+      const metal = surface === 'metal';
+      const volume = 1.6 * Math.min(.33, Math.max(.035, speed * .055)) * (soft ? .22 : bounce ? .42 : 1);
+      const d = this.out(pos, volume, { life: .24, reverb: .22, ref: .7, rolloff: 1.35 });
+      if (!d) return;
+      const t = this.ctx.currentTime, factor = kind === 'shotgun' ? .62 : kind === 'pistol' ? 1.17 : 1;
+      this.noiseBurst(d, t, soft ? .018 : .012, 'bandpass', (metal ? 4200 : 3100) * factor, 2.8, .75, .001);
+      if (!soft) {
+        this.tone(d, t, metal ? .18 : .09, 'sine', (metal ? 2600 : 1900) * factor, (metal ? 1700 : 1200) * factor, .25);
+        this.tone(d, t + .003, metal ? .13 : .07, 'sine', 1260 * factor, 870 * factor, .14);
+      }
+    },
     dryClick() {
       const d = this.out(null, 0.6, { life: 0.2, reverb: 0.2 }); if (!d) return;
       const t = this.ctx.currentTime;
@@ -201,14 +288,18 @@
         this.noiseBurst(d, t, 0.05, 'bandpass', 4200, 6, 0.6, 0.002);
         this.tone(d, t + 0.02, 0.06, 'triangle', 2600, 2200, 0.15);
       }
-      if (kind === 'spoon') {   // レバーが飛ぶ
-        this.tone(d, t, 0.08, 'triangle', 3200, 1800, 0.25);
-        this.noiseBurst(d, t, 0.03, 'bandpass', 5000, 6, 0.4, 0.001);
-      }
       if (kind === 'release') {
         this.noiseBurst(d, t, 0.05, 'bandpass', 3400, 5, 1.0, 0.001);
         this.tone(d, t, 0.06, 'square', 900, 400, 0.12);
       }
+    },
+    grenadeThrow() {
+      // 腕を振るときの袖と装備の短い擦れ。音程を持つ「ピュー」は鳴らさない。
+      const d = this.out(null, .68, { life: .28, reverb: .12, important: true }); if (!d) return;
+      const t = this.ctx.currentTime;
+      this.noiseBurst(d, t, .14, 'bandpass', 780, .55, .82, .01);
+      this.noiseBurst(d, t + .025, .1, 'lowpass', 560, .7, .7, .006);
+      this.noiseBurst(d, t + .055, .035, 'highpass', 2400, .6, .22, .002);
     },
     // ---- 足音：かかとの着地・つま先・靴底のこすれ・床の砂粒のきしみ・装備の揺れ・服のこすれを組み合わせて作る ----
     makeStepBank() {
@@ -308,16 +399,33 @@
     },
     // kind: 'walk' | 'run' | 'crouch' | 'prone'
     stepVol: 1,
+    prepareSurfaceSteps() {
+      if(this.surfaceSteps||!this.ctx||!G.FOOTSTEP_DATA)return;
+      this.surfaceSteps={};
+      for(const [key,encoded] of Object.entries(G.FOOTSTEP_DATA.surfaces))this.surfaceSteps[key]=encoded.map(str=>{
+        const bytes=atob(str), n=bytes.length/2, b=this.ctx.createBuffer(1,n,G.FOOTSTEP_DATA.sampleRate), d=b.getChannelData(0);
+        for(let i=0;i<n;i++){let v=bytes.charCodeAt(i*2)|(bytes.charCodeAt(i*2+1)<<8);d[i]=(v>=32768?v-65536:v)/32768;}return b;
+      });
+    },
+    woodBreak(pos) {
+      const out=this.out(pos,.7,{life:.5,reverb:.15});if(!out)return;
+      this.noiseBurst(out,this.ctx.currentTime,.32,'bandpass',950,1.4,.8,.005);
+      this.tone(out,this.ctx.currentTime,.1,'triangle',140,55,.35);
+    },
     footstep(pos, loud, isPlayer, kind) {
       if (!this.ok) return;
       if (!this.stepBank) { try { this.makeStepBank(); } catch (e) { return; } }
-      const bank = this.stepBank[kind || 'walk'] || this.stepBank.walk;
-      const d = this.out(isPlayer ? null : pos, loud * (isPlayer ? 0.2 : 1.0) * this.stepVol, { life: 0.7, reverb: 0.3, ref: 1.2, rolloff: 1.2 });
+      this.prepareSurfaceSteps();
+      const at=pos || G.Player?.pos || {x:0,y:0,z:0};
+      const surface=G.Surfaces.at(at.x,at.z,at.y);this.lastSurface=surface;
+      const recorded=this.surfaceSteps?.[surface];
+      const bank = kind === 'prone' || !recorded ? (this.stepBank[kind || 'walk'] || this.stepBank.walk) : recorded;
+      const d = this.out(isPlayer ? null : pos, loud * (isPlayer ? (recorded ? 0.75 : 0.2) : 1.0) * this.stepVol, { life: 0.7, reverb: 0.3, ref: 1.2, rolloff: 1.2 });
       if (!d) return;
       // 同じ音が続かないよう選び、高さと強さを毎回わずかに変える
       let idx = Math.floor(Math.random() * bank.length); if (idx === this._lastStep) idx = (idx + 1) % bank.length; this._lastStep = idx;
       const src = this.ctx.createBufferSource(); src.buffer = bank[idx];
-      src.playbackRate.value = 0.92 + Math.random() * 0.16;
+      src.playbackRate.value = (kind === 'run' ? 1.05 : kind === 'sneak' ? 0.96 : 1) * (0.98 + Math.random() * 0.04);
       src.connect(d); src.start();
     },
     grenadeBounce(pos, k) {
@@ -361,6 +469,29 @@
       this.noiseBurst(d, t + 0.01, 0.22, 'bandpass', 900, 0.7, 0.35, 0.01); // 服がこすれる
       if (this.gearBank) { const src = this.ctx.createBufferSource(); src.buffer = this.gearBank[(Math.random() * this.gearBank.length) | 0]; const g = this.ctx.createGain(); g.gain.value = 0.6; src.connect(g); g.connect(d); src.start(t + 0.02); }
     },
+    // 応急処置の音：袋を破る・面ファスナーをはがす（始め）、止血帯を巻き上げて留める・包帯を押さえる（終わり）
+    treat(phase, item) {
+      const d = this.out(null, 0.5, { life: 0.8, reverb: 0.2 }); if (!d) return;
+      const t = this.ctx.currentTime;
+      if (phase === 'start') {
+        for (let i = 0; i < 9; i++) this.noiseBurst(d, t + i * 0.022 + Math.random() * 0.01, 0.02, 'bandpass', 2600 + Math.random() * 1800, 2, 0.35, 0.001);
+        this.noiseBurst(d, t + 0.22, 0.25, 'bandpass', 1400, 0.8, 0.25, 0.02);
+      } else if (item === 'tq') {
+        for (let i = 0; i < 4; i++) { this.noiseBurst(d, t + i * 0.09, 0.03, 'bandpass', 1800, 4, 0.5, 0.001); this.tone(d, t + i * 0.09, 0.03, 'triangle', 900, 700, 0.12); }
+        this.noiseBurst(d, t + 0.4, 0.02, 'bandpass', 3200, 6, 0.6, 0.001);
+      } else {
+        this.noiseBurst(d, t, 0.35, 'bandpass', 900, 0.7, 0.3, 0.03);
+        this.noiseBurst(d, t + 0.3, 0.03, 'bandpass', 2400, 3, 0.3, 0.001);
+      }
+    },
+    // もげた部位が床に落ちる「ドッ」（体より軽く、湿った音）
+    limbDrop(pos, kind) {
+      const d = this.out(pos, kind === 'head' ? 0.9 : kind === 'leg' ? 1.0 : 0.7, { life: 0.6, reverb: 0.35, ref: 1.2, rolloff: 1.1 }); if (!d) return;
+      const t = this.ctx.currentTime;
+      this.tone(d, t, 0.14, 'sine', kind === 'leg' ? 85 : 110, 45, 0.8);
+      this.noiseBurst(d, t, 0.1, 'lowpass', 380, 0.8, 0.8, 0.002);
+      this.noiseBurst(d, t + 0.01, 0.12, 'bandpass', 900, 0.7, 0.25, 0.01);
+    },
     kneeDrop(pos) {
       const d = this.out(pos, 0.6, { life: 0.4, reverb: 0.3, ref: 1.2 }); if (!d) return;
       const t = this.ctx.currentTime;
@@ -395,6 +526,81 @@
       const t = this.ctx.currentTime;
       this.tone(d, t, 0.05, 'triangle', head ? 2400 : 1600, head ? 2200 : 1500, 0.5);
     },
+    preparePlayerVoice() {
+      if (this.playerVoiceBank || !this.ctx || !G.PLAYER_VOICE_DATA) return;
+      const data = G.PLAYER_VOICE_DATA;
+      this.playerVoiceBank = {};
+      for (const type of ['hurt', 'death']) {
+        this.playerVoiceBank[type] = data[type].map(encoded => {
+          const binary = atob(encoded), n = binary.length / 2;
+          const buffer = this.ctx.createBuffer(1, n, data.sampleRate), samples = buffer.getChannelData(0);
+          for (let i = 0; i < n; i++) {
+            let value = binary.charCodeAt(i * 2) | (binary.charCodeAt(i * 2 + 1) << 8);
+            if (value >= 32768) value -= 65536;
+            samples[i] = value / 32768;
+          }
+          return buffer;
+        });
+      }
+      this._lastPlayerVoice = -1;
+    },
+    prepareRadioVoices() {
+      if (this.radioVoiceBank || !this.ctx || !G.RADIO_VOICE_DATA) return;
+      const data = G.RADIO_VOICE_DATA;
+      this.radioVoiceBank = {};
+      for (const actor of ['alpha', 'bravo']) {
+        const bank = this.radioVoiceBank[actor] = {};
+        for (const [id, encoded] of Object.entries(data.voices[actor])) {
+          const binary = atob(encoded), n = binary.length / 2;
+          const buffer = this.ctx.createBuffer(1, n, data.sampleRate), samples = buffer.getChannelData(0);
+          for (let i = 0; i < n; i++) {
+            let value = binary.charCodeAt(i * 2) | (binary.charCodeAt(i * 2 + 1) << 8);
+            if (value >= 32768) value -= 65536;
+            samples[i] = value / 32768;
+          }
+          bank[id] = buffer;
+        }
+      }
+    },
+    radioVoice(ally, id, tone = 'normal') {
+      if (!this.ok || !ally) return null;
+      this.prepareRadioVoices();
+      const bank = this.radioVoiceBank?.[ally.id === 0 ? 'alpha' : 'bravo'];
+      const buffer = bank?.[id], pos = ally.voicePos?.();
+      if (!buffer || !pos) return null;
+      const gain = tone === 'whisper' ? .48 : tone === 'shout' ? 1.18 : .92;
+      const dest = this.out(pos, gain, { life: buffer.duration + .15, reverb: tone === 'shout' ? .1 : .05, ref: tone === 'shout' ? 3 : 2.2, rolloff: .7, important: true, follow: () => ally.voicePos() });
+      if (!dest) return null;
+      const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = tone === 'whisper' ? 300 : 115;
+      const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = tone === 'whisper' ? 3900 : 5200;
+      const src = this.ctx.createBufferSource(); src.buffer = buffer;
+      src.connect(hp); hp.connect(lp); lp.connect(dest);
+      if (dest.followItem) dest.followItem.source = src;
+      src.start();
+      src.onended = () => { src.disconnect(); hp.disconnect(); lp.disconnect(); if (dest.followItem) this.followingVoices?.delete(dest.followItem); };
+      return src;
+    },
+    playerVoice(type = 'hurt') {
+      if (!this.ok) return;
+      this.preparePlayerVoice();
+      const bank = this.playerVoiceBank && this.playerVoiceBank[type];
+      if (!bank || !bank.length) return;
+      const now = this.ctx.currentTime;
+      // Damage from several bullets in one burst must not produce a chorus of voices.
+      if (type !== 'death' && now < (this._playerVoiceUntil || 0)) return;
+      if (this._playerVoiceSource) { try { this._playerVoiceSource.stop(); } catch (_) { } }
+      let index = Math.floor(Math.random() * bank.length);
+      if (type === 'hurt' && bank.length > 1 && index === this._lastPlayerVoice) index = (index + 1) % bank.length;
+      if (type === 'hurt') this._lastPlayerVoice = index;
+      const buffer = bank[index];
+      const dest = this.out(null, type === 'death' ? 0.95 : 0.85, { life: buffer.duration + 0.1, reverb: 0.08, important: true });
+      if (!dest) return;
+      const source = this.ctx.createBufferSource(); source.buffer = buffer;
+      // Natural timing and pitch of the recording, with only a subtle room send.
+      source.connect(dest); source.start();
+      this._playerVoiceSource = source; this._playerVoiceUntil = now + buffer.duration;
+      source.onended = () => { source.disconnect(); if (this._playerVoiceSource === source) this._playerVoiceSource = null; };
+    },
     hurt() {
       const d = this.out(null, 0.8, { life: 0.4, reverb: 0.1 }); if (!d) return;
       const t = this.ctx.currentTime;
@@ -408,163 +614,64 @@
       f.frequency.exponentialRampToValueAtTime(5000, t + 0.15);
       if (hit) { this.noiseBurst(d, t + 0.1, 0.1, 'lowpass', 450, 1, 1.0, 0.002); this.tone(d, t + 0.1, 0.1, 'sine', 110, 55, 0.5); }
     },
-    // ---- 人の声（うめき・痛み・断末魔） ----
-    // 音声合成の研究で使われる「声帯の音源＋声道の共鳴」方式で、1サンプルずつ計算して作る。
-    //  ・声帯：開いて閉じる息の流れの波形（毎周期の長さと強さにわずかな揺らぎ＝人の声の生々しさ）
-    //  ・息：声帯が開いている間に混ざるかすれた息の音、語頭の「h」、語尾の吐く息
-    //  ・声道：口の形で決まる5つの共鳴（母音）を時間とともに変化させる
-    //  ・語尾：声が低く途切れ途切れになる「かすれ（ボーカルフライ）」
-    // 声の種類ごとに高さや声道の長さを変えた数パターンを起動時に作っておき、敵ごとに使い分ける。
-    makeVoiceBank(incremental) {
-      if (this.voiceBank && !this._voiceTodo) return;
-      if (this._voiceTodo) { while (this._voiceTodo.length) this._voiceTodo.shift()(); this._voiceTodo = null; return; }
-      const SR = 24000;
-      const V = { // 母音の共鳴周波数 F1〜F3（F4・F5 は固定）
-        a: [780, 1200, 2500], ah: [650, 1150, 2400], o: [520, 880, 2420], u: [330, 850, 2250], e: [520, 1750, 2500], m: [260, 950, 2200], ng: [300, 1100, 2350],
-      };
-      const lerp = (x, y, k) => x + (y - x) * k;
-      const track = (keys, t) => { // [[時刻0..1, 値]...] の折れ線
-        if (t <= keys[0][0]) return keys[0][1];
-        for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) { const k = (t - keys[i - 1][0]) / (keys[i][0] - keys[i - 1][0]); return Array.isArray(keys[i][1]) ? keys[i][1].map((v, j) => lerp(keys[i - 1][1][j], v, k)) : lerp(keys[i - 1][1], keys[i][1], k); }
-        return keys[keys.length - 1][1];
-      };
-      const synth = (P) => {
-        const n = Math.floor(P.dur * SR), out = new Float32Array(n);
-        let phase = 0, period = 1, jitterK = 1, shimK = 1, prevG = 0;
-        const res = [0, 0, 0, 0, 0].map(() => ({ y1: 0, y2: 0, A: 0, B: 0, C: 0 }));
-        const setRes = (r, F, BW) => { const T = 1 / SR; r.C = -Math.exp(-2 * Math.PI * BW * T); r.B = 2 * Math.exp(-Math.PI * BW * T) * Math.cos(2 * Math.PI * F * T); r.A = 1 - r.B - r.C; };
-        let nz = 0, nzLP = 0, breathLP = 0, hp = 0, hpPrev = 0;
-        for (let i = 0; i < n; i++) {
-          const t = i / n;
-          if ((i & 15) === 0) { // 16サンプルごとに声道の形を更新
-            const f = track(P.vowel, t).map(v => v * P.tract);
-            const bwK = P.bwK || 1;
-            setRes(res[0], f[0], 90 * bwK); setRes(res[1], f[1], 110 * bwK); setRes(res[2], f[2], 170 * bwK);
-            setRes(res[3], 3350 * P.tract, 250); setRes(res[4], 3800 * P.tract, 300);
-          }
-          // 声帯の周期（高さ）＋ゆっくりした震え＋語尾のかすれ
-          let f0 = track(P.f0, t) * P.pitch * (1 + Math.sin(i / SR * 2 * Math.PI * (P.tremHz || 6)) * (P.trem || 0));
-          const creak = P.creakFrom !== undefined && t > P.creakFrom ? (t - P.creakFrom) / (1 - P.creakFrom) : 0;
-          if (creak > 0) f0 *= 1 - creak * 0.55;
-          phase += f0 / SR * jitterK;
-          if (phase >= 1) {
-            phase -= 1;
-            jitterK = 1 + (Math.random() - 0.5) * 2 * (P.jitter + creak * 0.25);
-            shimK = 1 - Math.random() * (P.shimmer + creak * 0.6);
-            if (creak > 0.3 && Math.random() < creak * 0.5) shimK *= 0.15; // 途切れ途切れの脈
-            this._alt = !this._alt;
-            if (P.growl && this._alt) shimK *= 1 - P.growl;                // うなり（1回おきに弱い振動）
-          }
-          // 声帯から出る息の流れ（ローゼンバーグ波形）。その変化量が口から出る音の元になる
-          const Tp = 0.42, Tn = 0.14;
-          const g = phase < Tp ? 0.5 * (1 - Math.cos(Math.PI * phase / Tp)) : phase < Tp + Tn ? Math.cos(Math.PI * (phase - Tp) / (2 * Tn)) : 0;
-          let src = (g - prevG) * shimK * 18; prevG = g;
-          // 息の混ざり：声帯が開いている間に強くなる
-          nz = Math.random() * 2 - 1; nzLP += (nz - nzLP) * 0.55;
-          const breathy = track(P.breath, t);
-          src += (nz - nzLP) * breathy * (0.35 + g * 0.9) * 0.9;
-          const amp = track(P.amp, t);
-          // 声道の共鳴（直列）
-          let x = src * amp;
-          for (const r of res) { const y = r.A * x + r.B * r.y1 + r.C * r.y2; r.y2 = r.y1; r.y1 = y; x = y; }
-          // 口を閉じた音（m など）は高い音を弱める
-          const closed = P.closed ? track(P.closed, t) : 0;
-          if (closed > 0) { breathLP += (x - breathLP) * (1 - closed * 0.92); x = breathLP; }
-          // 語頭の「h」と語尾の吐く息（声のない息の音）
-          const aspir = P.aspir ? track(P.aspir, t) : 0;
-          if (aspir > 0) x += (nz - nzLP) * aspir * 0.25;
-          // 低すぎる音を切る
-          hp = 0.995 * (hp + x - hpPrev); hpPrev = x;
-          out[i] = hp;
-        }
-        // 音量をそろえる
-        let peak = 1e-6; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(out[i]));
-        for (let i = 0; i < n; i++) out[i] *= 0.9 / peak * (P.gain || 1);
-        if (P.raw) return out;
-        const buf = this.newBuffer(n, SR); buf.getChannelData(0).set(out);
-        return buf;
-      };
-      // いくつかの声の段階を、短く重ねながらつなげて1つの声にする
-      const compose = (segs) => {
-        const fade = Math.floor(0.012 * SR);
-        let total = 0; const parts = segs.map(s => { if (s.silence) { const z = new Float32Array(Math.floor(s.silence * SR)); total += z.length; return z; } const r = synth(Object.assign({ raw: true }, s)); total += r.length - fade; return r; });
-        const out = new Float32Array(total + fade + 8); let pos = 0;
-        for (const p of parts) {
-          for (let i = 0; i < p.length; i++) { const k = i < fade ? i / fade : 1; out[pos + i] += p[i] * k; }
-          pos += Math.max(0, p.length - fade);
-        }
-        let peak = 1e-6; for (let i = 0; i < out.length; i++) peak = Math.max(peak, Math.abs(out[i]));
-        for (let i = 0; i < out.length; i++) out[i] *= 0.9 / peak;
-        const buf = this.newBuffer(out.length, SR); buf.getChannelData(0).set(out);
-        return buf;
-      };
-      // 段階の部品
-      const gasp = (p, tr, dur, g) => ({ dur, pitch: p, tract: tr, jitter: 0.02, shimmer: 0.1, f0: [[0, 140], [1, 150]], vowel: [[0, V.ah], [1, V.a]],
-        amp: [[0, 0], [0.3, 0.06], [1, 0.02]], breath: [[0, 0.9], [1, 0.9]], aspir: [[0, 0], [0.25, 1.6], [0.8, 2.2], [1, 0]], gain: g || 0.55 });
-      const cry = (p, tr, dur, g, hi) => ({ dur, pitch: p, tract: tr, jitter: 0.06, shimmer: 0.38, trem: 0.025, tremHz: 6, growl: hi ? 0.5 : 0.42,
-        f0: [[0, 118], [0.2, 145 * (hi ? 1.05 : 1)], [0.6, 138 * (hi ? 1.04 : 1)], [1, 98]],
-        vowel: [[0, V.ah], [0.5, V.ah], [0.8, V.o], [1, V.o]], amp: [[0, 0], [0.06, 1], [0.45, 0.9], [0.6, 0.6], [0.7, 0.95], [0.9, 0.5], [1, 0]],
-        breath: [[0, 0.5], [0.6, 0.45], [1, 0.75]], creakFrom: 0.82, aspir: [[0, 0.2], [0.05, 0], [0.9, 0.2], [1, 0.6]], gain: g || 1 });
-      const ugh = (p, tr, dur, g) => ({ dur, pitch: p, tract: tr, jitter: 0.05, shimmer: 0.38, growl: 0.5, f0: [[0, 118], [0.3, 104], [1, 72]], bwK: 1.2,
-        vowel: [[0, V.ah], [0.5, V.o], [1, V.u]], amp: [[0, 0], [0.05, 1], [0.5, 0.7], [1, 0]], breath: [[0, 0.45], [1, 0.8]],
-        closed: [[0, 0.2], [0.6, 0.45], [1, 0.7]], creakFrom: 0.35, aspir: [[0, 0.3], [0.05, 0], [0.8, 0.2], [1, 0.6]], gain: g || 0.85 });
-      const sob = (p, tr, dur, g) => ({ dur, pitch: p, tract: tr, jitter: 0.05, shimmer: 0.35, trem: 0.02, tremHz: 4, growl: 0.45, f0: [[0, 108], [0.4, 114], [1, 82]], bwK: 1.3,
-        vowel: [[0, V.u], [0.5, V.ng], [1, V.m]], amp: [[0, 0], [0.12, 0.85], [0.5, 1], [0.8, 0.6], [1, 0]], breath: [[0, 0.55], [1, 0.75]],
-        closed: [[0, 0.5], [0.5, 0.6], [1, 0.8]], creakFrom: 0.6, aspir: [[0, 0.3], [0.9, 0.3], [1, 0.7]], gain: g || 0.7 });
-      this._voiceParts = { gasp, cry, ugh, sob, compose };
-      const T = {
-        // 自分の被弾：一瞬息が詰まる「うっ」。短く、口はほぼ閉じたまま
-        grunt: (p, tr) => ({ dur: 0.17, pitch: p, tract: tr, jitter: 0.02, shimmer: 0.15, f0: [[0, 128], [0.4, 122], [1, 104]], bwK: 1.2,
-          vowel: [[0, V.u], [0.5, V.u], [1, V.ng]], amp: [[0, 0], [0.06, 1], [0.6, 0.8], [0.85, 0.25], [1, 0]], breath: [[0, 0.25], [1, 0.3]],
-          closed: [[0, 0.55], [0.5, 0.45], [1, 0.7]], aspir: [[0, 0.5], [0.05, 0], [0.9, 0], [1, 0.15]] }),
-        // 短いうめき「ぐっ」：力んだ声、すぐ途切れる
-        hurt: (p, tr) => ({ dur: 0.32, pitch: p, tract: tr, jitter: 0.04, shimmer: 0.3, growl: 0.4, f0: [[0, 135], [0.25, 128], [1, 92]],
-          vowel: [[0, V.ah], [0.6, V.ah], [1, V.ng]], amp: [[0, 0], [0.04, 1], [0.5, 0.75], [1, 0]], breath: [[0, 0.3], [1, 0.45]], creakFrom: 0.55,
-          aspir: [[0, 0.6], [0.06, 0], [0.85, 0], [1, 0.3]] }),
-        // 苦痛の声「あぁ…ぐぅ」：息を吸ってから絞り出す、震える
-        pain: (p, tr) => ({ dur: 1.05, pitch: p, tract: tr, jitter: 0.035, shimmer: 0.2, trem: 0.035, tremHz: 7, f0: [[0, 150], [0.2, 182], [0.55, 168], [1, 105]],
-          vowel: [[0, V.a], [0.45, V.a], [0.75, V.o], [1, V.u]], amp: [[0, 0], [0.07, 0.4], [0.15, 1], [0.6, 0.85], [0.9, 0.35], [1, 0]], breath: [[0, 0.5], [0.4, 0.35], [1, 0.6]],
-          creakFrom: 0.72, aspir: [[0, 0.9], [0.08, 0.1], [0.9, 0.1], [1, 0.5]] }),
-        // 倒れるときの声「うっ…」：力が抜けて低くなる
-        death: (p, tr) => ({ dur: 0.8, pitch: p, tract: tr, jitter: 0.05, shimmer: 0.35, growl: 0.45, f0: [[0, 118], [0.3, 108], [1, 70]],
-          vowel: [[0, V.ah], [0.5, V.o], [1, V.u]], amp: [[0, 0], [0.04, 1], [0.35, 0.7], [1, 0]], breath: [[0, 0.35], [1, 0.8]],
-          creakFrom: 0.35, aspir: [[0, 0.5], [0.05, 0], [0.7, 0.1], [1, 0.6]] }),
-        // 瀕死のうめき「んん…」：口を閉じたこもった声、弱い息
-        moan: (p, tr) => ({ dur: 1.55, pitch: p, tract: tr, jitter: 0.03, shimmer: 0.22, trem: 0.05, tremHz: 4.5, f0: [[0, 118], [0.35, 126], [1, 92]], bwK: 1.3,
-          vowel: [[0, V.m], [0.4, V.ng], [0.7, V.u], [1, V.m]], amp: [[0, 0], [0.12, 0.8], [0.5, 1], [0.85, 0.5], [1, 0]], breath: [[0, 0.5], [1, 0.75]],
-          closed: [[0, 0.8], [0.35, 0.55], [0.7, 0.35], [1, 0.85]], creakFrom: 0.68, aspir: [[0, 0.2], [0.9, 0.1], [1, 0.5]] }),
-      };
-      // 声の高さ・声道の長さ（体格）を変えた4人分
-      const people = [[0.82, 1.08], [0.9, 1.04], [0.97, 1.0], [1.04, 0.97]];
-      this.voiceBank = {};
-      // 作る作業を種類ごとの小さな仕事に分ける
-      const todo = [];
-      for (const k in T) todo.push(() => { this.voiceBank[k] = people.map(([p, tr]) => synth(T[k](p, tr))); });
-      // 苦痛の声（段階をつないで作る）
-      // pain：息を吸い込む → 絞り出す叫び → 低く詰まった声
-      todo.push(() => { this.voiceBank.pain = people.map(([p, tr]) => compose([gasp(p, tr, 0.16, 0.5), cry(p, tr, 0.62), ugh(p, tr, 0.38)])); });
-      // agony：重傷。吸い込み → 震える長い叫び → 声が途切れる → 苦しい吸い込み → 詰まった声 → 震える息
-      todo.push(() => { this.voiceBank.agony = people.map(([p, tr]) => compose([gasp(p, tr, 0.22, 0.6), cry(p, tr, 0.95, 1, true), { silence: 0.05 }, gasp(p, tr, 0.2, 0.55), ugh(p, tr, 0.45, 0.9), sob(p, tr, 0.6, 0.65)])); });
-      // moan：瀕死。すすり泣くような震える声 → 苦しげな吸い込み → 弱く詰まった声
-      todo.push(() => { this.voiceBank.moan = people.map(([p, tr]) => compose([sob(p, tr, 0.85, 0.7), gasp(p, tr, 0.3, 0.5), ugh(p, tr * 1.02, 0.42, 0.6)])); });
-      if (!incremental) { for (const f of todo) f(); return; }
-      this._voiceTodo = todo;
-      const idle = window.requestIdleCallback || ((f) => setTimeout(f, 30));
-      const step = () => { if (!this._voiceTodo) return; const f = this._voiceTodo.shift(); if (f) f(); if (this._voiceTodo && this._voiceTodo.length) idle(step); else this._voiceTodo = null; };
-      idle(step);
+    // Shared human recordings are decoded once and spatialized for each enemy.
+    makeVoiceBank() {
+      this.preparePlayerVoice();if(!this.playerVoiceBank)return;
+      const b=this.playerVoiceBank;
+      if (!this.lastBreathBank) this.lastBreathBank = b.hurt.map(original => {
+        const data = original.getChannelData(0), rate = original.sampleRate;
+        let start = 0; while (start < data.length - 1 && Math.abs(data[start]) < .018) start++;
+        start = Math.max(0, start - Math.floor(rate * .012));
+        const n = Math.min(data.length - start, Math.floor(rate * .42));
+        const buffer = this.newBuffer(n, rate), samples = buffer.getChannelData(0);
+        for (let i = 0; i < n; i++) samples[i] = data[start + i] * Math.min(1, i / (rate * .012), (n - 1 - i) / (rate * .09));
+        return buffer;
+      });
+      this.voiceBank={hurt:b.hurt,pain:b.hurt,agony:b.death,death:b.death,lastBreath:this.lastBreathBank,moan:b.hurt,grunt:b.hurt};
+      this.enemyVoiceProfiles=ENEMY_VOICE_PROFILES;
+      this.enemyVoiceState ||= new Map();this.enemyVoiceActive ||= new Set();
     },
-    voice(pos, type, pitch, vol) {
-      if (!this.ok) return;
-      if (!this.voiceBank) { try { this.makeVoiceBank(true); } catch (e) { console.warn('声を作れません', e); } return; }   // まだ準備中なら今回は鳴らさない
-      const bank = this.voiceBank[type]; if (!bank) return;
-      const idx = Math.max(0, Math.min(bank.length - 1, Math.round(((pitch || 1) - 0.85) / 0.3 * (bank.length - 1))));
-      const buf = bank[idx];
-      const loud = { hurt: 1.0, pain: 1.05, agony: 1.1, death: 0.85, moan: 0.55, grunt: 0.8 }[type];
-      const d = this.out(pos, (vol || 1) * loud * 0.8, { life: buf.duration + 0.4, reverb: 0.45, ref: 1.6, rolloff: 1.1, important: type !== 'moan' });
-      if (!d) return;
-      const src = this.ctx.createBufferSource(); src.buffer = buf;
-      src.playbackRate.value = 0.96 + Math.random() * 0.08;   // 毎回わずかに違う
-      src.connect(d); src.start();
+    stopEnemyVoices(){
+      for(const src of this.enemyVoiceActive||[]){try{src.stop();src.disconnect();}catch(_){}}
+      this.enemyVoiceActive?.clear();this.enemyVoiceState?.clear();this.followingVoices?.clear();
+    },
+    deathVoice(pos, pitch, actorId, follow, cause = 'body') {
+      // Stop an unfinished cry even when this death is silent.
+      const state = this.enemyVoiceState?.get(actorId);
+      if (state?.source) {
+        try { state.source.stop(); state.source.disconnect(); } catch (_) {}
+        for (const item of this.followingVoices || []) if (item.source === state.source) this.followingVoices.delete(item);
+        this.enemyVoiceActive?.delete(state.source); state.source = null; state.until = 0;
+      }
+      if (!this.ok || !pos || cause === 'head') return null;
+      const subdued = cause === 'neck' || cause === 'bleed';
+      if (Math.random() < (subdued ? .75 : .45)) return null;
+      return this.voice(pos, 'lastBreath', pitch, subdued ? .38 : .62, actorId, follow);
+    },
+    voice(pos,type,pitch,vol,actorId,follow){
+      if(!this.ok)return;this.makeVoiceBank();
+      const bank=this.voiceBank?.[type];if(!bank?.length)return;
+      const key=actorId===undefined?'generic':actorId,now=this.ctx.currentTime;
+      const state=this.enemyVoiceState.get(key)||{index:-1,until:0,source:null};
+      const terminal = type === 'death' || type === 'lastBreath';
+      if(!terminal&&now<state.until)return;
+      if(state.source&&terminal){try{state.source.stop();state.source.disconnect();}catch(_){}this.enemyVoiceActive.delete(state.source);}
+      if(this.enemyVoiceActive.size>=6)return;
+      const actorNumber=typeof actorId==='number'?actorId:0;
+      const profile=ENEMY_VOICE_PROFILES[((actorNumber%10)+10)%10];
+      let index=state.index<0?actorNumber%bank.length:Math.floor(Math.random()*bank.length);
+      if(bank.length>1&&index===state.index)index=(index+1)%bank.length;
+      const buf=bank[index],rate=Math.max(.8,Math.min(1.22,profile.rate*(1+((pitch||1)-1)*.04)));
+      const loud={hurt:.85,pain:1,agony:1,death:.85,moan:.4,grunt:.7}[type]||.8;
+      const d=this.out(pos,(vol===undefined?1:vol)*loud,{life:buf.duration/rate+.1,reverb:.11,ref:1.6,rolloff:1.1,follow});if(!d)return;
+      const src=this.ctx.createBufferSource();src.buffer=buf;src.playbackRate.value=rate;
+      const eq=this.ctx.createBiquadFilter();eq.type='peaking';eq.frequency.value=profile.hz;eq.Q.value=.8;eq.gain.value=profile.eq;
+      const top=this.ctx.createBiquadFilter();top.type='lowpass';top.frequency.value=profile.top;
+      src.connect(eq);eq.connect(top);top.connect(d);src.start();
+      if(d.followItem)d.followItem.source=src;
+      state.index=index;state.until=now+buf.duration/rate+.1;state.source=src;this.enemyVoiceState.set(key,state);this.enemyVoiceActive.add(src);
+      src.onended=()=>{src.disconnect();eq.disconnect();top.disconnect();this.enemyVoiceActive.delete(src);if(d.followItem)this.followingVoices?.delete(d.followItem);if(state.source===src)state.source=null;};
+      return src;
     },
     jingle(win) {
       const d = this.out(null, 0.35, { life: 2.5, reverb: 0.8, important: true }); if (!d) return;

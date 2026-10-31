@@ -27,9 +27,9 @@
   ok('対策オフでもピンチ操作は無視（画面が拡大されない）', m2.wheel === 1, m2.wheel);
   // キーで倍率変更
   I.mouse.rmb = true; Gm.step(20); const z0 = P.zoom;
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', bubbles: true })); Gm.step(1); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyX', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Equal', bubbles: true })); Gm.step(1); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Equal', bubbles: true }));
   const z1 = P.zoom;
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', bubbles: true })); Gm.step(1); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyZ', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Minus', bubbles: true })); Gm.step(1); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Minus', bubbles: true }));
   ok('X／Zで倍率を変えられる', z1 === z0 + 0.5 && P.zoom === z0, [z0, z1, P.zoom].join('→'));
   I.mouse.rmb = false;
 

@@ -171,7 +171,7 @@
       x.fillStyle = 'rgba(255,60,40,1)'; x.beginPath(); x.arc(64, 64, 4, 0, 7); x.fill();
       const tex = new THREE.CanvasTexture(c);
       const ret = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.03), new THREE.MeshBasicMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-      put(dot, ret, 0, 0.108, -0.029);
+      put(dot, ret, 0, 0.108, -0.029); ret.visible = false; // The HUD reticle is the single aiming reference.
     }
     // サプレッサー（消音器）
     const sup = new THREE.Group(); put(g, sup, 0, 0.045, -0.648); sup.visible = false;
@@ -359,6 +359,7 @@
     VM.gun.add(VM.lHand.root);
     VM.rArm = buildArm(M); VM.root.add(VM.rArm.g);
     VM.lArm = buildArm(M); VM.root.add(VM.lArm.g);
+    VM.setOneArm = (on) => { VM.oneArm = !!on; VM.reloadRate = on ? 0.6 : 1; };
 
     // ナイフ（攻撃時だけ表示）
     VM.knife = new THREE.Group(); VM.knife.visible = false; VM.root.add(VM.knife);
@@ -511,6 +512,19 @@
     VM.state.reload = { t: 0, empty, dur: empty ? D.dur.empty : D.dur.tac, track: D.track(empty), sfx: D.sfx(empty).slice(), oldDropped: false };
   };
   VM.cancelReload = function () { VM.state.reload = null; VM.state.shell = null; VM.resetParts(); };
+  // A new sortie must not inherit a held grenade, treatment pose, or unfinished switch.
+  VM.resetActions = function () {
+    Object.assign(VM.state, {
+      reload:null, shell:null, sw:null, att:null, knifeT:-1, pumpT:-1, pumpEject:false,
+      gHold:false, gThrowT:-1, gK:0, lowered:false, lowK:0, sprint:0, ads:0,
+      kickZ:0, kickRx:0, kickVz:0, kickVrx:0, kickRoll:0, slideV:0, slideLock:false,
+      flashT:0, swayX:0, swayY:0
+    });
+    VM.knife.visible = false; VM.knifeArm.g.visible = false;
+    VM.gHandG.visible = false; VM.gArm.g.visible = false;
+    VM.flash.visible = false; VM.flashLight.intensity = 0;
+    VM.resetParts();
+  };
   VM.resetParts = function () {
     if (VM.mag) { VM.mag.position.copy(VM.magHome); VM.mag.rotation.copy(VM.weapons[VM.cur].magRot); VM.mag.visible = true; if (VM.mag.parent !== VM.gun) VM.gun.add(VM.mag); }
     if (VM.charging) VM.charging.position.copy(VM.chHome);
@@ -532,11 +546,11 @@
   VM.SHELL = { intro: 0.3, each: 0.5, outro: 0.3, pump: 0.5 };
   VM.startShellReload = function (count, empty) { VM.state.shell = { t: 0, count, loaded: 0, empty, stop: false, phase: 'intro', pt: 0 }; };
   VM.stopShellReload = function () { if (VM.state.shell) VM.state.shell.stop = true; };
-  VM.pump = function () { VM.state.pumpT = 0; };
+  VM.pump = function (eject = false) { VM.state.pumpT = 0; VM.state.pumpEject = eject; };
   VM.PUMP_TIME = 0.5;
   function updateShell(dt) {
     const s = VM.state, R = s.shell, Sx = VM.SHELL;
-    R.pt += dt; R.t += dt;
+    dt *= VM.reloadRate || 1; R.pt += dt; R.t += dt;
     let ev = null;
     const shell = VM.weapons.shotgun.shellMesh;
     if (R.phase === 'intro') {
@@ -583,7 +597,7 @@
         const k = t < 0.4 ? smooth(t / 0.4) : 1 - smooth((t - 0.4) / 0.5);
         VM.charging.position.copy(VM.chHome).addScaledVector(D.partTravel, k);
         VM.lHand.root.position.addScaledVector(D.partTravel, k);
-        if (!s.pumpS1 && t > 0.1) { s.pumpS1 = true; G.Audio.reload('pumpB'); }
+        if (!s.pumpS1 && t > 0.1) { s.pumpS1 = true; G.Audio.reload('pumpB'); if (s.pumpEject) { G.Effects.ejectPlayerCasing('shotgun'); s.pumpEject = false; } }
         if (!s.pumpS2 && t > 0.62) { s.pumpS2 = true; G.Audio.reload('pumpF'); }
         if (t >= 1) { s.pumpT = -1; s.pumpS1 = s.pumpS2 = false; VM.charging.position.copy(VM.chHome); }
       }
@@ -595,7 +609,7 @@
       }
       return null;
     }
-    R.t += dt;
+    R.t += dt * (VM.reloadRate || 1);   // 片腕では装填に時間がかかる
     const t = R.t, T = D.tm;
     setLeft(poseAt(R.track, t));
     while (R.sfx.length && R.sfx[0][0] <= t) { G.Audio.reload(R.sfx.shift()[1]); }
@@ -738,7 +752,9 @@
       VM.gMesh.visible = true;
       gp.set(0.2, lerp(-0.4, -0.08, smooth(s.gK)), lerp(-0.22, -0.26, s.gK)); gr.set(lerp(0.2, 0.6, s.gK), 0.1, 0.2);
     }
-    const gLower = Math.max(s.gK, s.gThrowT >= 0 ? 1 : 0);
+    // 応急処置中は銃を下ろす
+    s.lowK = lerp(s.lowK || 0, s.lowered ? 1 : 0, Math.min(1, dt * 6));
+    const gLower = Math.max(s.gK, s.gThrowT >= 0 ? 1 : 0, s.lowK * 1.4);
     VM.pivot.position.y -= gLower * 0.2; VM.pivot.position.x -= gLower * 0.03; rx -= gLower * 0.5; ry += gLower * 0.2;
     VM.gHandG.visible = gVis; VM.gArm.g.visible = gVis;
     VM.gHandG.position.copy(gp); VM.gHandG.rotation.set(gr.x, gr.y, gr.z);
@@ -757,6 +773,14 @@
     }
     VM.pivot.position.y -= knifeK * 0.18; rx -= knifeK * 0.6; ry += knifeK * 0.3;
     VM.pivot.rotation.set(rx, ry, rz);
+    // ADS uses the actual front sight position. Remove independent viewmodel roll/sway at full ADS.
+    const align = smooth(s.ads);
+    if (align > 0 && !s.reload && !s.shell && !s.att && knifeK === 0 && !s.gHold && s.gThrowT < 0) {
+      VM.pivot.rotation.set(rx * (1-align), ry * (1-align), rz * (1-align));
+      const sightY = VM.cur === 'pistol' ? 0.059 : VM.cur === 'shotgun' ? 0.052 : VM.att.ar.optic === 'dot' ? 0.108 : 0.118;
+      VM.pivot.position.x *= 1-align;
+      VM.pivot.position.y = lerp(VM.pivot.position.y, -sightY, align);
+    }
 
     // 古いマガジンの落下
     if (s.oldMagT >= 0) {
@@ -775,6 +799,8 @@
     _e2.copy(L_ELBOW).lerp(L_ELBOW_ADS, adsK * pistolK);
     aimArm(VM.rArm, _a, _e1);
     aimArm(VM.lArm, _b, _e2);
+    // 片腕を失っていれば左手と左腕を描かない（右手だけで構える）
+    VM.lArm.g.visible = !VM.oneArm; VM.lHand.root.visible = !VM.oneArm;
     if (VM.knife.visible) { VM.knifeHand.root.localToWorld(_a.set(0, 0, 0.07)); aimArm(VM.knifeArm, _a, K_ELBOW); }
     if (VM.gHandG.visible) { VM.gHand.root.localToWorld(_a.set(0, 0, 0.07)); aimArm(VM.gArm, _a, R_ELBOW); }
     // フラッシュ

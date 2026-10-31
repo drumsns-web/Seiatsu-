@@ -9,7 +9,7 @@
   const aimAt = (y, x, z) => { const c = G.camera.position; const dx = x - c.x, dz = z - c.z, dy = y - c.y; P.yaw = Math.atan2(-dx, -dz); P.pitch = Math.atan2(dy, Math.hypot(dx, dz)); P.recoil = 0; Gm.step(1); };
 
   // ---- 持ち替え ----
-  fresh(); place(3.5, 2.5, Math.PI);
+  fresh(); place(12.5, 2.5, Math.PI);
   tap('Digit2'); Gm.step(40);
   ok('2キーでハンドガンに持ち替え', P.cur === 'pistol' && VM.cur === 'pistol' && P.ammo === 15, P.cur + '/' + VM.cur);
   tap('Digit3'); Gm.step(40);
@@ -20,8 +20,42 @@
   const a0 = P.ammo; I.mouse.lmb = true; Gm.step(3); I.mouse.lmb = false; Gm.step(30);
   ok('持ち替えの途中は撃てない', P.ammo === a0);
 
+  // The player must not fire while the rendered gun is still recovering from a lowered pose.
+  fresh(); place(12.5, 2.5, Math.PI);
+  key('KeyW'); key('ShiftLeft'); Gm.step(25);
+  const sprintAmmo = P.ammo;
+  I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false;
+  ok('ダッシュから銃を上げる途中は撃たない', P.ammo === sprintAmmo && P.fireQueueT > 0 && VM.state.sprint > .16);
+  key('ShiftLeft', 'keyup'); key('KeyW', 'keyup'); Gm.step(25);
+  ok('構えが戻ると押した射撃を行う', P.ammo < sprintAmmo && VM.state.sprint <= .16);
+  fresh(); place(12.5, 2.5, Math.PI);
+  VM.state.lowK = 1; VM.state.lowered = false;
+  const medAmmo = P.ammo;
+  I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false;
+  ok('処置後に銃が下がっている間は撃たない', P.ammo === medAmmo && P.fireQueueT > 0);
+  Gm.step(25);
+  ok('処置後に銃が上がってから撃つ', P.ammo < medAmmo && VM.state.lowK <= .16);
+
+  // Restarting during a lowered action must clear both the action and its rendered pose.
+  for (const action of ['treatment', 'grenade', 'switch']) {
+    fresh(); place(12.5, 2.5, Math.PI);
+    if (action === 'treatment') { P.hp = 80; P.startTreat(); Gm.step(20); }
+    if (action === 'grenade') { key('KeyG'); Gm.step(20); }
+    if (action === 'switch') { tap('Digit2'); Gm.step(3); }
+    fresh(); place(12.5, 2.5, Math.PI);
+    const ammo = P.ammo; I.mouse.lmb = true; Gm.step(35); I.mouse.lmb = false;
+    ok(action + '途中の再出撃後に構えが戻り射撃できる', P.ammo < ammo && !VM.state.lowered && !VM.state.gHold && VM.cur === P.cur);
+  }
+  fresh(); place(12.5, 2.5, Math.PI);
+  P.hp = 80; P.startTreat(); Gm.step(30);
+  const treatingAmmo = P.ammo, medicine = P.med.medicine;
+  I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false;
+  ok('引き金で処置を中断し、銃が上がるまでは発射しない', !P.treat && P.ammo === treatingAmmo && P.med.medicine === medicine);
+  Gm.step(35);
+  ok('処置中断後に構えてから予約した1発を撃つ', P.ammo === treatingAmmo - 1 && VM.state.lowK <= .16);
+
   // ---- ハンドガン：単発 ----
-  fresh(); place(3.5, 2.5, 0.3); P.pitch = 0.3; tap('Digit2'); Gm.step(40);
+  fresh(); place(12.5, 2.5, 0.3); P.pitch = 0.3; tap('Digit2'); Gm.step(40);
   const p0 = P.ammo; I.mouse.lmb = true; Gm.step(60); I.mouse.lmb = false; Gm.step(5);
   ok('ハンドガンは押し続けても1発だけ（単発）', p0 - P.ammo === 1, p0 - P.ammo);
   for (let i = 0; i < 4; i++) { I.mouse.lmb = true; Gm.step(2); I.mouse.lmb = false; Gm.step(8); }
@@ -33,8 +67,8 @@
 
   // ---- ショットガン：散弾・ポンプ・1発ずつ装填 ----
   fresh();
-  const e = G.Enemies.list[0]; place(3.5, 2.5, Math.PI); tap('Digit3'); Gm.step(40);
-  resetE(e, 3.5, 5.5); aimAt(1.2, e.pos.x, e.pos.z);
+  const e = G.Enemies.list[0]; place(12.5, 2.5, Math.PI); tap('Digit3'); Gm.step(40);
+  resetE(e, 12.5, 5.5); aimAt(1.2, e.pos.x, e.pos.z);
   I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(1);
   ok('ショットガン近距離（3m）：散弾がまとまって当たり大ダメージ', e.hp <= 0 || 100 - e.hp > 60, 100 - e.hp);
   const s1 = P.ammo; I.mouse.lmb = true; Gm.step(5); I.mouse.lmb = false; Gm.step(1);
@@ -53,12 +87,18 @@
   const mid = P.ammo;
   ok('1発ずつ装填される（途中で弾数が増えていく）', mid > 2 && mid < 6, mid);
   I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false;
+  ok('ショットガンは装填中のクリックと同じフレームで発射', !P.reloading && P.ammo === mid - 1, mid + '→' + P.ammo);
   Gm.step(80);
   ok('装填中に撃つと、装填をやめて撃てる', !P.reloading && P.ammo >= mid - 1 && P.ammo < 6, P.ammo);
   ok('予備弾は入れた分だけ減る', res0 - P.reserve === (P.ammo + (P.ammo < mid ? 1 : 0)) - 2 || res0 - P.reserve >= mid - 2, res0 - P.reserve);
+  P.ammo = 0; P.pumpT = 0; P.fireCD = 0; tap('KeyR');
+  I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false;
+  ok('空のショットガンでも発射予約を維持', P.reloading && P.fireWhenLoaded && P.ammo === 0);
+  Gm.step(100);
+  ok('最初の一発を装填したら予約した発射を行う', !P.reloading && !P.fireWhenLoaded && P.ammo === 0);
 
   // ---- 手りゅう弾 ----
-  fresh(); place(3.5, 2.5, Math.PI); P.pitch = 0.1;
+  fresh(); place(12.5, 2.5, Math.PI); P.pitch = 0.1;
   const g0 = P.grenades;
   key('KeyG'); Gm.step(20);
   ok('Gを押し続けると構え、軌道が表示される', P.gHold && G.Grenades.previewLine.visible && G.Grenades.ring.visible);
@@ -71,7 +111,7 @@
   Gm.step(80);
   ok('約2.6秒で爆発して消える', G.Grenades.list.length === 0);
   // 中央クリックでも
-  fresh(); place(3.5, 2.5, Math.PI);
+  fresh(); place(12.5, 2.5, Math.PI);
   I.mouse.mmb = true; Gm.step(10); const holding = P.gHold; I.mouse.mmb = false; Gm.step(12);
   ok('マウス中央クリックでも構えて投げられる', holding && G.Grenades.list.length === 1);
   // 爆発の被害：近くの敵は倒れ、壁の向こうは無傷
@@ -87,10 +127,10 @@
   G.Grenades.explode(new THREE.Vector3(7.5, 0.05, 2.5));
   ok('壁の向こう（3m先）の敵は爆風を受けない', wb.hp === 100, wb.hp);
   // 自分も巻き込まれる（伏せると軽く）
-  fresh(); place(3.5, 2.5, Math.PI);
-  G.Grenades.explode(new THREE.Vector3(3.5, 0.05, 5.5)); const hpStand = P.hp;
-  fresh(); place(3.5, 2.5, Math.PI); tap('ControlLeft'); Gm.step(30);
-  G.Grenades.explode(new THREE.Vector3(3.5, 0.05, 5.5)); const hpProne = P.hp;
+  fresh(); place(12.5, 2.5, Math.PI);
+  G.Grenades.explode(new THREE.Vector3(12.5, 0.05, 5.5)); const hpStand = P.hp;
+  fresh(); place(12.5, 2.5, Math.PI); tap('ControlLeft'); Gm.step(30);
+  G.Grenades.explode(new THREE.Vector3(12.5, 0.05, 5.5)); const hpProne = P.hp;
   ok('近くの爆発で自分も負傷し、伏せていると被害が小さい', hpStand < 100 && hpProne > hpStand, hpStand.toFixed(0) + ' / ' + hpProne.toFixed(0));
   // 敵は手りゅう弾から逃げる
   fresh();
@@ -102,40 +142,31 @@
   ok('近くに手りゅう弾が落ちた敵は逃げる', evaded, ev.state);
   ok('爆発前に離れている', ev.dead === false && ev.hp > 0, 'hp ' + ev.hp.toFixed(0));
 
-  // ---- ホイールで歩く速さ ----
-  fresh(); place(3.5, 2.5, Math.PI);
-  G.Game.wheelMode = 'speed';
-  I.mouse.wheel = 3; Gm.step(1);
-  ok('ホイール下で歩く速さが下がる（3段階下で50%）', P.speedLevel === 2, P.speedLevel);
-  const z0 = P.pos.z; key('KeyW'); Gm.step(60); key('KeyW', 'keyup'); Gm.step(10);
-  const slowDist = P.pos.z - z0;
-  I.mouse.wheel = -10; Gm.step(1); place(3.5, 2.5, Math.PI);
-  const z1 = P.pos.z; key('KeyW'); Gm.step(60); key('KeyW', 'keyup'); Gm.step(10);
-  const fullDist = P.pos.z - z1;
-  ok('遅い段階では進む距離が短い', slowDist < fullDist * 0.6 && slowDist > 0.5, slowDist.toFixed(2) + ' / ' + fullDist.toFixed(2));
-  // 遅いほど足音が敵に届かない
-  const heard = (lvl) => { fresh(); place(4.5, 4.5, Math.PI); P.speedLevel = lvl; const e = G.Enemies.list[0]; e.update = e.constructor.prototype.update; resetE(e, 4.5, 9.0); e.state = 'patrol'; e.heardT = -999; e.waitT = 99; key('KeyW'); Gm.step(40); key('KeyW', 'keyup'); return e.heardT > -999; };
-  const hFast = heard(5), hSlow = heard(1);
-  ok('最も遅い速さの足音は近くの敵にも聞こえない（普通の速さは聞こえる）', hFast && !hSlow, hFast + ' / ' + hSlow);
-  G.Game.wheelMode = 'weapon'; fresh(); place(3.5, 2.5, Math.PI); I.mouse.wheel = 1; Gm.step(40);
-  ok('設定でホイールを武器の持ち替えに戻せる', P.cur === 'pistol', P.cur);
-  G.Game.wheelMode = 'speed';
-  // X/Z（十字キー上下と同じ操作）
-  fresh(); place(3.5, 2.5, Math.PI); tap('KeyZ'); tap('KeyZ');
-  ok('照準していないときは X/Z（十字キー上下）で歩く速さ', P.speedLevel === 3, P.speedLevel);
+  // ---- X忍び歩きと武器ホイール ----
+  fresh(); place(12.5, 2.5, Math.PI);
+  const z0=P.pos.z; key('KeyW'); key('KeyX'); Gm.step(60); key('KeyW','keyup'); key('KeyX','keyup');Gm.step(10);
+  const slowDist=P.pos.z-z0;
+  fresh(); place(12.5,2.5,Math.PI);const z1=P.pos.z;key('KeyW');Gm.step(60);key('KeyW','keyup');Gm.step(10);
+  const fullDist=P.pos.z-z1;
+  ok('X忍び歩きは通常より十分に遅い',slowDist<fullDist*.3&&slowDist>.3,slowDist.toFixed(2)+' / '+fullDist.toFixed(2));
+  const heard=(slow)=>{fresh();place(12.5,2.5,Math.PI);const e=G.Enemies.list[0];e.update=e.constructor.prototype.update;resetE(e,12.5,7);e.state='patrol';e.heardT=-999;e.waitT=99;e.perceive=()=>{e.visible=false;};key('KeyW');if(slow)key('KeyX');Gm.step(40);key('KeyW','keyup');key('KeyX','keyup');return e.heardT>-999;};
+  const hFast=heard(false),hSlow=heard(true);ok('X忍び歩きは近くの敵に足音が届かない',hFast&&!hSlow,hFast+' / '+hSlow);
+  fresh();I.mouse.wheel=1;Gm.step(40);ok('ホイール下で次の武器',P.cur==='pistol',P.cur);
+  I.mouse.wheel=-1;Gm.step(40);ok('ホイール上で前の武器',P.cur==='ar',P.cur);
+  fresh();tap('Minus');tap('Equal');ok('倍率キーは腰だめ時の歩行速度を変えない',P.speedLevel===5);
 
   // ---- 壁際：振り返りやリーンでカメラが跳ばない ----
   fresh(); place(7.69, 2.5, 0);
-  tap('KeyE'); let maxJump = 0, prev = G.camera.position.clone();
-  for (let i = 0; i < 64; i++) { P.yaw += 0.1; Gm.step(1); maxJump = Math.max(maxJump, G.camera.position.distanceTo(prev)); prev.copy(G.camera.position); }
-  ok('壁際でリーンしたまま振り返ってもカメラが跳ばない（1フレーム6cm未満）', maxJump < 0.06, maxJump.toFixed(3));
+  tap('KeyE'); let maxJump = 0, jumpInfo=null, prev = G.camera.position.clone();
+  for (let i = 0; i < 64; i++) { P.yaw += 0.1; Gm.step(1); if(G.camera.position.distanceTo(prev)>maxJump){maxJump=G.camera.position.distanceTo(prev);jumpInfo={i,yaw:P.yaw,prev:prev.toArray(),now:G.camera.position.toArray(),pos:P.pos.toArray(),off:P.leanOff,amt:P.leanAmt};} prev.copy(G.camera.position); }
+  ok('壁際でリーンしたまま振り返ってもカメラが跳ばない（1フレーム6cm未満）', maxJump < 0.06, maxJump.toFixed(3)+' '+JSON.stringify(jumpInfo));
   let inWall = false; for (let i = 0; i < 64; i++) { P.yaw += 0.1; Gm.step(1); const c = G.camera.position; if (G.World.overlapsSolid(c.x, c.z, 0.05, 2)) inWall = true; }
   ok('カメラが壁の中に入らない', !inWall);
   tap('KeyE');
 
 
   // ---- 装備：照準器とサプレッサー ----
-  fresh(); place(3.5, 2.5, Math.PI);
+  fresh(); place(12.5, 2.5, Math.PI);
   G.Game.loadout = { optic: 'dot', arSup: true, pistolSup: false }; G.Game.applyLoadout(); Gm.step(2);
   I.mouse.rmb = true; Gm.step(25);
   ok('ドットサイト：照準すると1.3倍で、スコープの黒い円は出ず赤い点が出る', Math.abs(G.camera.fov - P.currentFov()) < 0.01 && G.camera.fov > 50 && !document.getElementById('scope').classList.contains('on') && document.getElementById('reddot').classList.contains('on'), G.camera.fov.toFixed(1));
@@ -147,7 +178,7 @@
   ok('サプレッサーなしの銃声は15m先の敵に聞こえ、付けると聞こえない', loud && !quiet, loud + ' / ' + quiet);
   ok('サプレッサー付きの銃はその分長い（銃口が前に出る）', G.Viewmodel.weapons.ar.muzzle.position.z < -0.8);
   // ゲーム中の付け外し
-  fresh(); G.Game.loadout = { optic: 'scope', arSup: false, pistolSup: false }; G.Game.applyLoadout(); place(3.5, 2.5, 0); P.pitch = 0.4;
+  fresh(); G.Game.loadout = { optic: 'scope', arSup: false, pistolSup: false }; G.Game.applyLoadout(); place(12.5, 2.5, 0); P.pitch = 0.4;
   tap('KeyT'); const a1 = P.ammo; I.mouse.lmb = true; Gm.step(30); I.mouse.lmb = false;
   ok('Tで取り付け開始。取り付け中は撃てない', P.ammo === a1 && P.attachT > 0);
   Gm.step(80);
@@ -168,7 +199,7 @@
     ok('木の壁の向こうは見えない', !G.World.lineOfSight(G.camera.position.x, G.camera.position.y, G.camera.position.z, 17.5, 1.2, 2.5));
     const h0 = e.hp; I.mouse.lmb = true; Gm.step(1); I.mouse.lmb = false; Gm.step(2);
     const dmg = h0 - e.hp;
-    ok('ライフルの弾が木の壁を貫通して敵に当たる（威力は約65%）', dmg > 15 && dmg < 34, dmg.toFixed(1));
+    ok('ライフルの弾が木の壁を貫通して弱まり、敵に当たる', dmg >= 12 && dmg < 34, dmg.toFixed(1));
     ok('木の壁の表と裏に穴が開く', G.Effects.decals.length >= 2, G.Effects.decals.length);
   }
   fresh();

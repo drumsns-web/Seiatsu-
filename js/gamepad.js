@@ -23,9 +23,12 @@
     { id: 'zoomIn', label: '倍率を上げる（照準中）／歩く速さを上げる', def: 12 },
     { id: 'zoomOut', label: '倍率を下げる（照準中）／歩く速さを下げる', def: 13 },
     { id: 'pause', label: '一時停止・再開', def: 9 },
-    { id: 'debug', label: 'AI状態の表示（開発用）', def: 8 },
+    { id: 'treat', label: '応急処置（出血を止める）', def: 8 },
+    { id: 'command', label: '仲間に指示（ついてこい／その場で待て）', def: null },
+    { id: 'moveOrder', label: '照準位置へ仲間を移動', def: null },
+    { id: 'debug', label: 'AI状態の表示（開発用）', def: null },
   ];
-  const EDGE_ACTIONS = ['reload', 'crouch', 'prone', 'leanL', 'leanR', 'knife', 'zoomIn', 'zoomOut', 'debug', 'nextWeapon', 'suppressor'];
+  const EDGE_ACTIONS = ['treat', 'command', 'moveOrder', 'reload', 'crouch', 'prone', 'leanL', 'leanR', 'knife', 'zoomIn', 'zoomOut', 'debug', 'nextWeapon', 'suppressor'];
 
   const Pad = G.Pad = {
     BTN_NAMES, PAD_ACTIONS,

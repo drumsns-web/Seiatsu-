@@ -21,13 +21,28 @@
   const WEAPON = G.WEAPON = WEAPONS.ar;
   const ORDER = ['ar', 'pistol', 'shotgun'];
   const GRENADE_MAX = 3;
+  // ---- 出血と応急処置。治療薬は出血がないときの体力回復に使う ----
+  // 傷の種類：light＝軽い出血（包帯）、limb＝手足の動脈からの激しい出血（止血帯）、torso＝胴体の激しい出血（止血剤）
+  const BLEED = {
+    light: { rate: 0.18, item: 'band', name: '軽い出血' },
+    limb: { rate: 1.1, item: 'tq', name: '手足の激しい出血' },
+    torso: { rate: 0.8, item: 'hemo', name: '胴体の激しい出血' },
+  };
+  const MED = {
+    tq: { name: '止血帯', time: 3.0, cost: 1 },
+    hemo: { name: '止血剤', time: 4.0, cost: 1 },
+    band: { name: '包帯', time: 2.5, cost: 1 },
+    medicine: { name: '治療薬', time: 1.8, cost: 1 },
+  };
+  const MED_CAPACITY = 6;   // 医療ポーチに入る数
+  G.BLEED = BLEED; G.MED = MED; G.MED_CAPACITY = MED_CAPACITY;
   const POSTURE = {
     stand: { eye: 1.64, body: 1.8, speed: 3.3 },
     crouch: { eye: 1.08, body: 1.2, speed: 1.7 },
     prone: { eye: 0.34, body: 0.5, speed: 0.75 },
   };
   const SPRINT_SPEED = 5.6;
-  const SPEED_LEVELS = [0.35, 0.5, 0.65, 0.8, 1.0];   // ホイールで選ぶ歩く速さ
+  const SPEED_LEVELS = [0.35, 0.5, 0.65, 0.8, 1.0];   // 旧セーブ・テストとの互換用。操作は通常／X忍び歩き
   const BASE_FOV = 70;
 
   // ======================= プレイヤー =======================
@@ -37,19 +52,28 @@
       this.pos = V3(s.x, 0, s.z);
       this.yaw = Math.PI; this.pitch = 0; this.recoil = 0;
       this.vel = V3(0, 0, 0);
+      this.grounded = true; this.gruntT = -99; this.camInit=false; this.bobK=0; this.strafeRoll=0; this.shake=0;
       this.posture = 'stand'; this.eyeH = POSTURE.stand.eye;
       this.lean = 0; this.leanAmt = 0; this.leanOff = 0;
       this.hp = 100;
       this.wst = {}; for (const k of ORDER) this.wst[k] = { ammo: WEAPONS[k].mag, reserve: WEAPONS[k].reserve };
       this.cur = 'ar'; this.switchT = 0; this.pumpT = 0; this.prevFire = false;
       this.grenades = 2; this.gHold = false; this.gCD = 0;
+      this.throwPending = 0; this.pumpPending = 0; this.attachT = 0; this.gEmptyMsg = false;
       this.walkSlow = false; this.speedLevel = SPEED_LEVELS.length; this.gearAcc = 0; this.lastYaw = Math.PI; this.turnGearT = 0;
       if (G.Viewmodel.weapons) G.Viewmodel.equip('ar');
       this.adsT = 0; this.ads = false; this.zoom = 4;
       this.sprinting = false; this.sprintBlock = 0; this.moving = false;
-      this.fireCD = 0; this.lastShotT = -99; this.dryFired = false;
-      this.reloading = false; this.knifeT = -1; this.knifeCD = 0; this.knifeHitDone = true;
+      this.fireCD = 0; this.lastShotT = -99; this.dryFired = false; this.fireQueueT = 0;
+      this.reloading = false; this.fireWhenLoaded = false; this.knifeT = -1; this.knifeCD = 0; this.knifeHitDone = true;
       this.stepAcc = 0; this.dead = false; this.hurtT = 0;
+      // 出血と医療品（出撃時の装備から）
+      const lm = (G.Game.loadout && G.Game.loadout.med) || { tq: 1, hemo: 1, band: 2, medicine: 1 };
+      this.med = { tq: lm.tq | 0, hemo: lm.hemo | 0, band: lm.band | 0, medicine: lm.medicine | 0 };
+      this.wounds = []; this.treat = null; this.dripT = 0; this.bleedDeath = false;
+      this.legHits = 0; this.crippled = false; this.legLost = null; this.headLost = false; this.armLost = null; this.swayT = Math.random() * 100;
+      if (G.Viewmodel.setOneArm) G.Viewmodel.setOneArm(false);
+      if (this.lostLegBody) { G.Physics.removeRagdoll(this.lostLegBody); G.Game.scene.remove(this.lostLegBody.root); this.lostLegBody.dispose(); this.lostLegBody = null; }
       this.kills = 0; this.shots = 0; this.hits = 0;
     },
     get ammo() { return this.wst[this.cur].ammo; }, set ammo(v) { this.wst[this.cur].ammo = v; },
@@ -59,6 +83,7 @@
     switchWeapon(id) {
       if (!WEAPONS[id] || id === this.cur || this.dead || this.knifeT >= 0 || this.gHold) return;
       if (this.reloading) { this.reloading = false; G.Viewmodel.cancelReload(); }
+      this.fireQueueT = 0; this.fireWhenLoaded = false;
       this.cur = id; this.switchT = G.Viewmodel.SWITCH_TIME; this.pumpT = 0;
       G.Viewmodel.switchTo(id); G.Audio.reload('grab');
       HUD.ammo(); HUD.weapons();
@@ -80,26 +105,156 @@
       const head = this.camPos().clone();
       if (this.posture === 'prone') {
         const f = V3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-        return [head, this.pos.clone().addScaledVector(f, -0.5).setY(0.25)];
+        return [head, this.pos.clone().addScaledVector(f, -0.5).setY(this.pos.y + 0.25)];
       }
-      return [head, V3(this.pos.x, this.eyeH * 0.68, this.pos.z), V3(this.pos.x, this.eyeH * 0.35, this.pos.z)];
+      return [head, V3(this.pos.x, this.pos.y + this.eyeH * 0.68, this.pos.z), V3(this.pos.x, this.pos.y + this.eyeH * 0.35, this.pos.z)];
     },
-    canFit(h) { return !G.World.overlapsSolid(this.pos.x, this.pos.z, 0.3, h); },
+    canFit(h) { return !G.World.overlapsSolid(this.pos.x, this.pos.z, 0.3, h, this.pos.y); },
     setPosture(p) {
+      if (this.crippled && p !== 'prone') { HUD.msg(this.legLost ? '脚を失っていて立てない' : '脚を撃たれていて立てない'); return false; }
       if (p === this.posture) return true;
+      if (!this.grounded) return false;
       if (POSTURE[p].body > POSTURE[this.posture].body && !this.canFit(POSTURE[p].body)) { HUD.msg('頭上に障害物があります'); return false; }
       this.posture = p;
       if (p === 'prone') { this.lean = 0; }
       G.Audio.gear(null, 0.8, true);
       return true;
     },
-    hurt(dmg, from) {
+    jump() {
+      if (this.crippled) return;
+      if (this.dead || !this.grounded) return;
+      if (this.posture !== 'stand' && !this.setPosture('stand')) return;
+      this.vel.y = 5.6; this.grounded = false; this.stepAcc = 0; this.gearPending = 0;
+      G.Audio.gear(null, this.walkSlow ? .025 : 0.4, true);
+    },
+    // 傷を負う（area: 'torso'|'arm'|'leg'。省略時は姿勢に応じて当たりやすい場所から選ぶ）
+    addWound(area, opts) {
+      opts = opts || {};
+      if (!area) {
+        const r = Math.random(), pr = this.posture === 'prone';
+        area = r < (pr ? 0.45 : 0.55) ? 'torso' : r < (pr ? 0.72 : 0.77) ? 'arm' : 'leg';
+      }
+      // 激しい出血になる確率（手足は動脈、胴体は内臓・大きな血管）。それ以外は軽い出血か、出血なし
+      const heavyP = opts.heavy !== undefined ? opts.heavy : area === 'torso' ? 0.18 : 0.28;
+      let type = null;
+      if (Math.random() < heavyP) type = area === 'torso' ? 'torso' : 'limb';
+      else if (Math.random() < (opts.lightP !== undefined ? opts.lightP : 0.75)) type = 'light';
+      if (!type) return null;
+      const w = { type, area, rate: BLEED[type].rate, packed: false, t: G.time };
+      this.wounds.push(w);
+      if (this.wounds.length > 8) this.wounds.shift();
+      if (type !== 'light') HUD.msg(BLEED[type].name + '　' + G.keyName(G.Input.binds.treat) + ' で処置', 2.5);
+      HUD.medical();
+      return w;
+    },
+    bleedRate() { return this.wounds.reduce((s, w) => s + w.rate, 0); },
+    // 立てなくなる：伏せたまま、這って移動しかできない（撃つこと・処置はできる）
+    cripple(reason) {
+      if (this.crippled || this.dead) return;
+      this.crippled = true;
+      this.posture = 'prone'; this.lean = 0; this.sprinting = false; this.ads = false;
+      G.Audio.playerVoice('hurt'); this.shake = Math.max(this.shake || 0, 0.6);
+      HUD.msg(reason || '脚を撃たれて立てない…這って動くしかない', 4);
+    },
+    // 片腕を失う：両手で構える主力武器は狙いが大きくぶれ、反動も抑えられない。ハンドガンは比較的扱える
+    loseArm(side, from) {
+      if (this.armLost || this.dead) return;
+      this.armLost = side >= 0 ? 'L' : 'R';
+      this.wounds.push({ type: 'limb', area: 'arm', rate: 1.5, packed: false, stump: true, t: G.time });
+      G.Viewmodel.setOneArm(true);
+      G.Audio.playerVoice('hurt'); this.shake = Math.max(this.shake || 0, 0.7);
+      HUD.msg('腕を失った…　片手では主力武器が扱いにくい。' + G.keyName(G.Input.binds.treat) + ' で止血帯を', 4);
+      HUD.medical();
+    },
+    // 片腕での扱いにくさ（ぶれ・反動・照準の遅さ）
+    oneArmK() { return !this.armLost ? 1 : this.cur === 'pistol' ? 1.5 : 3.2; },
+    // 脚を失う（敵のショットガンの至近距離）：立てなくなり、切り口から激しく出血する
+    loseLeg(side, from) {
+      if (this.legLost || this.dead) return;
+      this.legLost = side >= 0 ? 'L' : 'R';
+      this.wounds.push({ type: 'limb', area: 'leg', rate: 1.8, packed: false, stump: true, t: G.time });
+      this.cripple('脚を失った…　' + G.keyName(G.Input.binds.treat) + ' で止血帯を巻かないと失血死する');
+      // もげた脚：自分と同じ服の体から、脚だけを固い形にして落とす
+      try {
+        const b = G.Humanoid.create({ style: 'swat', team: G.Game.team, gear: 'helmet-sunglasses' }); G.Game.scene.add(b.root);
+        b.root.position.copy(this.pos); b.root.rotation.y = this.yaw + Math.PI;
+        b.update({ dt: 1 / 60, speed: 0, crouch: 0, aim: 1, aimPitch: 0, twist: 0, reload: -1, scene: G.Game.scene });
+        b.root.visible = false;
+        const dir = from ? V3(this.pos.x - from.x, 0, this.pos.z - from.z).normalize() : V3(0, 0, 1);
+        G.Physics.sever(b, { part: 'legs', side, dir });
+        this.lostLegBody = b;
+      } catch (err) { }
+      HUD.medical();
+    },
+    // 傷による動きへの影響：脚の傷は歩きが遅くなる、腕の傷は狙いがぶれる
+    legWound() { return this.wounds.some(w => w.area === 'leg' && w.type !== 'light') ? 0.78 : this.wounds.some(w => w.area === 'leg') ? 0.9 : 1; },
+    armWound() { return this.wounds.some(w => w.area === 'arm' && w.type !== 'light') ? 1.6 : this.wounds.some(w => w.area === 'arm') ? 1.25 : 1; },
+    // 応急処置：いちばん危ない傷から、合う道具で処置する（合う道具がなければ包帯で押さえる）
+    startTreat() {
+      if (this.dead || this.treat) { if (this.treat) { this.treat = null; G.Viewmodel.state.lowered = false; HUD.msg('処置を中断'); } return; }
+      const todo = this.wounds.filter(w => w.rate > 0).sort((a, b) => b.rate - a.rate);
+      const mate = G.Allies.nearbyWounded(this), selfHeavy = todo.some(w => w.type !== 'light' && !w.packed);
+      if (mate && (!selfHeavy || !todo.length)) {
+        const T = mate.pickTreat(this.med);
+        if (!T) { HUD.msg('仲間に使える医療品がありません'); return; }
+        if (this.reloading) { this.reloading = false; G.Viewmodel.cancelReload(); }
+        this.treat = { ...T, t: 0, dur: MED[T.item].time, ally: mate };
+        mate.treat = null;
+        G.Viewmodel.state.lowered = true; G.Audio.treat && G.Audio.treat('start', T.item);
+        HUD.msg(mate.name + 'を' + (T.full ? MED[T.item].name : '包帯（代用）') + 'で処置中…'); return;
+      }
+      if (!todo.length) {
+        if (this.hp >= 100 || !this.med.medicine) { HUD.msg(this.hp < 100 ? '治療薬がありません' : '処置は不要です'); return; }
+        if (this.reloading) { this.reloading = false; G.Viewmodel.cancelReload(); }
+        this.treat = { item: 'medicine', t: 0, dur: MED.medicine.time, full: true };
+        this.sprinting = false; this.ads = false; G.Viewmodel.state.lowered = true;
+        G.Audio.treat && G.Audio.treat('start', 'medicine'); HUD.msg('治療薬で処置中…'); return;
+      }
+      let pick = null;
+      for (const w of todo) {
+        const want = BLEED[w.type].item;
+        if (!w.packed && this.med[want] > 0) { pick = { w, item: want, full: true }; break; }
+        if (w.type !== 'light' && !w.packed && this.med.band > 0) { pick = { w, item: 'band', full: false }; break; }   // 代用：包帯で押さえる
+        if (w.type === 'light' && this.med.band > 0) { pick = { w, item: 'band', full: true }; break; }
+      }
+      if (!pick) { HUD.msg('使える医療品がありません'); return; }
+      if (this.reloading) { this.reloading = false; G.Viewmodel.cancelReload(); }
+      if (this.gHold) { this.gHold = false; G.Viewmodel.grenadeHold(false); G.Grenades.preview(null); }
+      this.treat = { ...pick, t: 0, dur: MED[pick.item].time };
+      this.sprinting = false; this.ads = false;
+      G.Viewmodel.state.lowered = true;
+      G.Audio.treat && G.Audio.treat('start', pick.item);
+      HUD.msg((pick.full ? MED[pick.item].name : '包帯（代用）') + 'で処置中…');
+    },
+    finishTreat() {
+      const T = this.treat; this.treat = null; G.Viewmodel.state.lowered = false;
+      if (T.ally) {
+        if (T.ally.dead) { HUD.msg(T.ally.name + 'は助からなかった'); return; }
+        T.ally.applyTreat(T, this.med); HUD.msg(T.ally.name + 'の' + G.BLEED[T.w.type].name + 'を' + (T.full ? '止めた' : '押さえた')); G.Audio.treat && G.Audio.treat('end', T.item); HUD.medical(); return;
+      }
+      if (T.item === 'medicine') {
+        this.med.medicine = Math.max(0, this.med.medicine - 1);
+        this.hp = Math.min(100, this.hp + 30);
+        G.Audio.treat && G.Audio.treat('end', 'medicine'); HUD.msg('治療薬で体力を30回復した'); HUD.medical(); return;
+      }
+      this.med[T.item] = Math.max(0, this.med[T.item] - 1);
+      const w = T.w;
+      if (T.full) { this.wounds = this.wounds.filter(x => x !== w); HUD.msg(BLEED[w.type].name + 'を止めた'); }
+      else { w.packed = true; w.rate *= w.type === 'torso' ? 0.5 : 0.4; HUD.msg('包帯で押さえた（完全には止まっていない）'); }
+      G.Audio.treat && G.Audio.treat('end', T.item);
+      HUD.medical();
+    },
+    hurt(dmg, from, area) {
       if (this.dead || G.Game.state !== 'playing') return;
       this.hp = Math.max(0, this.hp - dmg);
+      if (this.hp > 0 && dmg >= 6) this.addWound(area === 'head' ? 'torso' : area);
+      // 脚に3発で立てなくなる
+      if (area === 'leg' && this.hp > 0) { this.legHits++; if (this.legHits >= 3) this.cripple(); }
+      if (this.treat && dmg >= 6) { this.treat = null; G.Viewmodel.state.lowered = false; HUD.msg('撃たれて処置が中断された'); }
       this.hurtT = 0.35;
       G.Audio.hurt();
       G.Pad.vibrate(0.9, 0.4, 160);
-      if (G.time - (this.gruntT || -9) > 0.35) { this.gruntT = G.time; G.Audio.voice(null, 'grunt', 0.95, 0.5); }
+      if (this.hp <= 0 || G.time - this.gruntT > 0.5) { this.gruntT = G.time; G.Audio.playerVoice(this.hp <= 0 ? 'death' : 'hurt'); }
       HUD.damageFrom(from);
       this.recoil += 0.01;
       if (this.hp <= 0) { this.dead = true; G.Game.startDeathCam(from); }
@@ -109,14 +264,18 @@
       const I = G.Input;
       // ---- 切り替え操作（押した瞬間だけ） ----
       for (const a of edges) {
-        if (a === 'crouch') {
+        if (a === 'treat') { this.startTreat(); continue; }
+        if (a === 'command') { G.Allies.toggleMode(); continue; }
+        if (a === 'moveOrder') { G.Allies.orderAtReticle(); continue; }
+        if (a === 'jump') {
+          this.jump();
+        } else if (a === 'crouch') {
           if (this.posture === 'crouch') this.setPosture('stand');
           else this.setPosture('crouch');
         } else if (a === 'prone') {
           if (this.posture === 'prone') { if (!this.setPosture('stand')) { if (this.setPosture('crouch')) HUD.msg('立てないためしゃがみました'); } }
           else this.setPosture('prone');
         } else if (a === 'leanL' || a === 'leanR') {
-          if (this.posture === 'prone') { HUD.msg('匍匐中はリーンできません'); continue; }
           const dir = a === 'leanL' ? -1 : 1;
           this.lean = this.lean === dir ? 0 : dir;
           if (this.sprinting) this.sprintBlock = 0.3;
@@ -133,11 +292,7 @@
         else if (a === 'nextWeapon') this.switchWeapon(ORDER[(ORDER.indexOf(this.cur) + 1) % ORDER.length]);
         else if (a === 'zoomIn' || a === 'zoomOut') {
           if (this.ads && this.cur === 'ar' && G.Viewmodel.att.ar.optic === 'scope') { this.zoom = clamp(this.zoom + (a === 'zoomIn' ? 0.5 : -0.5), 2, 8); HUD.zoom(this.zoom); }
-          else if (!this.ads) {
-            // 照準していないときは歩く速さ（十字キー上下・X/Z）。ホイールと同じ5段階
-            this.speedLevel = clamp(this.speedLevel + (a === 'zoomIn' ? 1 : -1), 1, SPEED_LEVELS.length);
-            HUD.msg(`歩く速さ ${Math.round(SPEED_LEVELS[this.speedLevel - 1] * 100)}%`);
-          }
+
         } else if (a === 'interact') {
           HUD.msg('調べる・ドア操作はまだありません');
         }
@@ -145,27 +300,53 @@
 
       // ---- ダッシュ ----
       const Pad = G.Pad;
-      const fireBtn = I.mouse.lmb || Pad.fire, adsBtn = I.mouse.rmb || Pad.ads;
-      const fwdKey = (I.isDown('forward') && !I.isDown('back')) || Pad.move.y < -0.35;
+      const fireBtn = I.mouse.lmb || Pad.fire || I.isDown('fire'), adsBtn = I.mouse.rmb || Pad.ads || I.isDown('ads');
+      if (fireBtn && this.treat) {
+        this.treat = null;
+        HUD.msg('射撃のため処置を中断');
+      }
+      // Derive the lowered pose from the active action instead of leaving a latched flag.
+      G.Viewmodel.state.lowered = !!this.treat;
+      const fwdKey = (I.isDown('forward') && !I.isDown('back')) || Pad.move.y < -0.35 || G.Touch.move.y < -0.35;
       this.sprintBlock -= dt;
-      const wantSprint = (I.isDown('sprint') || Pad.sprintLatch) && this.posture === 'stand' && fwdKey && this.knifeT < 0 && this.sprintBlock <= 0 && !fireBtn;
+      const wantSprint = (I.isDown('sprint') || Pad.sprintLatch) && this.posture === 'stand' && fwdKey && this.knifeT < 0 && this.sprintBlock <= 0 && !fireBtn && !this.treat && this.legWound() > 0.8 && !this.crippled;
       if (wantSprint && !this.sprinting) { this.lean = 0; } // 開始時にリーン解除（照準は下で解除）
       if (fireBtn && this.sprinting) this.sprintBlock = 0.25;
       this.sprinting = wantSprint;
 
       // ---- 照準（右クリックを押している間） ----
       this.switchT -= dt; this.gCD -= dt; this.attachT = (this.attachT || 0) - dt;
-      const busy = this.switchT > 0 || this.gHold || G.Viewmodel.state.gThrowT >= 0 || this.attachT > 0;
+      const busy = this.switchT > 0 || this.gHold || G.Viewmodel.state.gThrowT >= 0 || this.attachT > 0 || !!this.treat;
+      // 出血：体力が少しずつ減り続ける（自然には止まらない）
+      const br = this.bleedRate();
+      if (br > 0 && !this.dead) {
+        this.hp = Math.max(0, this.hp - br * dt);
+        this.dripT -= dt;
+        if (this.dripT <= 0) {
+          this.dripT = br > 1 ? 0.35 : 0.9;
+          const h = G.World.raycast(this.pos.x + (Math.random() - 0.5) * 0.4, 0.5, this.pos.z + (Math.random() - 0.5) * 0.4, 0, -1, 0, 1);
+          if (h && G.Game.gore !== 'off') G.Effects.bloodDecal(h, 0.06 + Math.min(0.12, br * 0.06));
+        }
+        if (this.hp <= 0) { this.dead = true; this.bleedDeath = true; G.Audio.playerVoice('death'); G.Game.startDeathCam(null); return; }
+      }
+      if (this.treat) {
+        // 仲間の処置中に離れたら中断
+        if (this.treat.ally && (this.treat.ally.dead || this.treat.ally.pos.distanceTo(this.pos) > 2.3)) { this.treat = null; G.Viewmodel.state.lowered = false; HUD.msg('仲間から離れたので処置を中断'); }
+        else { this.treat.t += dt; if (this.treat.t >= this.treat.dur) this.finishTreat(); }
+      }
       this.ads = adsBtn && !this.reloading && !this.sprinting && this.knifeT < 0 && !this.dead && !busy;
-      this.adsT = clamp(this.adsT + (this.ads ? dt : -dt) / (this.cur === 'ar' ? 0.16 : 0.13), 0, 1);
+      this.adsT = clamp(this.adsT + (this.ads ? dt : -dt) / ((this.cur === 'ar' ? 0.16 : 0.13) * (this.armLost ? (this.cur === 'pistol' ? 1.4 : 2.5) : 1)), 0, 1);
+      // 片腕：銃を支えきれず、狙いがゆっくり大きく揺れる（主力武器ほど大きい）
+      if (this.armLost) {
+        this.swayT += dt;
+        const a = (this.cur === 'pistol' ? 0.004 : 0.016) * (this.ads ? 1.4 : 1), t = this.swayT;
+        this.yaw += (Math.sin(t * 1.3) * 0.6 + Math.sin(t * 2.9 + 1) * 0.4) * a * dt * 3;
+        this.pitch = clamp(this.pitch + (Math.sin(t * 1.7 + 2) * 0.6 + Math.sin(t * 3.7) * 0.4) * a * dt * 3 - (this.cur === 'pistol' ? 0 : a * dt * 0.8), -1.45, 1.45);
+      }
       if (mouse.wheel) {
         if (this.ads && this.cur === 'ar' && G.Viewmodel.att.ar.optic === 'scope') { this.zoom = clamp(this.zoom - mouse.wheel * 0.5, 2, 8); HUD.zoom(this.zoom); }
-        else if (!this.ads && G.Game.wheelMode === 'weapon') { const i = ORDER.indexOf(this.cur); this.switchWeapon(ORDER[(i + (mouse.wheel > 0 ? 1 : ORDER.length - 1)) % ORDER.length]); }
-        else if (!this.ads) {
-          // ホイールで歩く速さを5段階に（上で速く、下で遅く）
-          this.speedLevel = clamp(this.speedLevel - mouse.wheel, 1, SPEED_LEVELS.length);   // 回した目盛りの数だけ
-          HUD.msg(`歩く速さ ${Math.round(SPEED_LEVELS[this.speedLevel - 1] * 100)}%`);
-        }
+        else if (!this.ads) { const i = ORDER.indexOf(this.cur); this.switchWeapon(ORDER[(i + (mouse.wheel > 0 ? 1 : ORDER.length - 1)) % ORDER.length]); }
+
       }
 
       // ---- 視点 ----
@@ -191,14 +372,14 @@
       this.recoil *= Math.exp(-dt * 7);
 
       // ---- 移動 ----
-      let mx = Pad.move.x, mz = Pad.move.y;     // スティックは傾け具合でゆっくり歩ける
+      let mx = Pad.move.x + G.Touch.move.x, mz = Pad.move.y + G.Touch.move.y;     // スティックは傾け具合でゆっくり歩ける
       if (I.isDown('forward')) mz -= 1; if (I.isDown('back')) mz += 1;
       if (I.isDown('left')) mx -= 1; if (I.isDown('right')) mx += 1;
       const ml = Math.hypot(mx, mz), mag = Math.min(1, ml);
       this.walkSlow = (I.isDown('walk') || Pad.walkToggle) && !this.sprinting;
       // 歩く速さ：ゆっくり歩くキーは最も遅い段階、それ以外はホイールで選んだ段階
-      this.walkK = this.sprinting ? 1 : this.walkSlow ? Math.min(SPEED_LEVELS[0] + 0.05, SPEED_LEVELS[this.speedLevel - 1]) : SPEED_LEVELS[this.speedLevel - 1];
-      let speed = this.sprinting ? SPRINT_SPEED : POSTURE[this.posture].speed * this.walkK;
+      this.walkK = this.sprinting ? 1 : this.walkSlow ? 0.2 : SPEED_LEVELS[this.speedLevel - 1];
+      let speed = (this.sprinting ? SPRINT_SPEED : POSTURE[this.posture].speed * this.walkK) * (this.crippled ? 0.7 : this.legWound()) * (this.treat ? 0.45 : 1);
       if (this.adsT > 0.5) speed *= 0.6;
       if (this.reloading) speed *= 0.85;
       const sinY = Math.sin(this.yaw), cosY = Math.cos(this.yaw);
@@ -211,34 +392,45 @@
       const acc = 1 - Math.exp(-dt * 14);
       this.vel.x += (tx - this.vel.x) * acc; this.vel.z += (tz - this.vel.z) * acc;
       const before = this.pos.clone();
-      G.World.moveCircle(this.pos, this.vel.x * dt, this.vel.z * dt, 0.3, POSTURE[this.posture].body);
+      G.World.moveCircle(this.pos, this.vel.x * dt, this.vel.z * dt, 0.3, POSTURE[this.posture].body, this.pos.y);
+      const wasGrounded = this.grounded;
+      this.vel.y -= 17 * dt;
+      const vertical = G.World.moveVertical(this.pos, this.vel.y * dt, 0.3, POSTURE[this.posture].body);
+      this.grounded = vertical.grounded;
+      if (vertical.grounded || vertical.hitCeiling) this.vel.y = 0;
+      if (!wasGrounded && this.grounded) {
+        G.Audio.footstep(this.pos, 0.85, true, 'walk');
+        G.Audio.gear(null, 0.5, true);
+        G.Enemies.broadcast(this.pos.clone(), 9, 'footstep', true, null);
+        this.stepAcc = 0;
+      }
       const moved = Math.hypot(this.pos.x - before.x, this.pos.z - before.z);
       this.moving = moved / Math.max(dt, 1e-4) > 0.4;
 
       // 足音（敵にも聞こえる。ダッシュは遠くまで、しゃがみ・匍匐は小さく）
-      this.stepAcc += moved;
-      this.bobPhase = (this.bobPhase || 0) + moved / stride0(this) * Math.PI;
+      if (this.grounded) this.stepAcc += moved;
+      this.bobPhase = (this.bobPhase || 0) + (this.grounded ? moved : 0) / stride0(this) * Math.PI;
       const stride = stride0(this);
       // 止まっている状態から歩き出したときは、すぐに最初の一歩が鳴るようにする
-      if (moved > 0.002 && !this.wasMoving) this.stepAcc = Math.max(this.stepAcc, stride * 0.7);
+      if (this.grounded && moved > 0.002 && !this.wasMoving) this.stepAcc = Math.max(this.stepAcc, stride * 0.7);
       this.wasMoving = moved > 0.002;
-      if (this.stepAcc > stride) {
+      if (this.grounded && this.stepAcc > stride) {
         this.stepAcc = 0;
         // 遅く歩くほど足音は小さく、敵に聞こえる距離も短い
         const wk = this.walkK;
         const slow = !this.sprinting && wk <= 0.55 && this.posture !== 'prone';
         const baseR = this.sprinting ? 16 : this.posture === 'stand' ? 7 : this.posture === 'crouch' ? 3 : 1.5;
-        const radius = this.sprinting ? baseR : baseR * (0.25 + 0.75 * wk * wk);
+        const radius = this.walkSlow ? 0.45 : this.sprinting ? baseR : baseR * (0.25 + 0.75 * wk * wk);
         G.Enemies.broadcast(V3(this.pos.x, 0.1, this.pos.z), radius, 'footstep', true, null);
         const kind = this.sprinting ? 'run' : slow ? 'sneak' : this.posture === 'stand' ? 'walk' : this.posture;
         // 歩きは控えめ、走りははっきり大きく
-        const vol = this.sprinting ? 1.35 : kind === 'sneak' ? 0.25 : this.posture === 'stand' ? 0.6 * (0.5 + 0.5 * wk) : this.posture === 'crouch' ? 0.42 : 0.35;
-        G.Audio.footstep(null, vol, true, kind);
+        const vol = this.sprinting ? 1.35 : kind === 'sneak' ? (this.walkSlow ? 0.035 : 0.25) : this.posture === 'stand' ? 0.6 * (0.5 + 0.5 * wk) : this.posture === 'crouch' ? 0.42 : 0.35;
+        G.Audio.footstep(this.pos, vol, true, kind);
         this.gearPending = 0.12 + Math.random() * 0.1;   // 足音の少し後に装備がこすれる
       }
       if (this.gearPending > 0) {
         this.gearPending -= dt;
-        if (this.gearPending <= 0) G.Audio.gear(null, this.sprinting ? 1 : (this.posture === 'stand' ? 0.55 : 0.45) * (0.4 + 0.6 * this.walkK), true);
+        if (this.gearPending <= 0) G.Audio.gear(null, this.walkSlow ? .025 : this.sprinting ? 1 : (this.posture === 'stand' ? 0.55 : 0.45) * (0.4 + 0.6 * this.walkK), true);
       }
       // 素早く振り向いたときも装備がこすれる
       this.turnGearT -= dt;
@@ -251,40 +443,59 @@
       // ---- リーン（視点位置と射線をずらす。壁に入り込まない） ----
       this.leanAmt += (this.lean - this.leanAmt) * (1 - Math.exp(-dt * 11));
       const side = this.leanAmt >= 0 ? 1 : -1, r = this.right();
-      let maxOff = 0.42;
-      for (const dy of [0, -0.15, 0.08]) {
-        const hh = World_raycastSide(this.pos.x, Math.max(0.1, this.eyeH + dy), this.pos.z, r.x * side, r.z * side, 0.7);
-        if (hh) maxOff = Math.min(maxOff, Math.max(0, hh.t - 0.22));
+      const proneLean = this.posture === 'prone';
+      const leanReach = proneLean ? 0.26 : 0.42;
+      let maxOff = leanReach;
+      for (const dy of (proneLean ? [0, 0.09] : [0, -0.15, 0.08])) {
+        const hh = World_raycastSide(this.pos.x, Math.max(0.1, this.pos.y + this.eyeH + dy), this.pos.z, r.x * side, r.z * side, 0.7);
+        if (hh) maxOff = Math.min(maxOff, Math.max(0, hh.t - (proneLean ? 0.17 : 0.22)));
       }
-      const leanTarget = Math.min(Math.abs(this.leanAmt) * 0.42, maxOff) * side;
+      const leanTarget = Math.min(Math.abs(this.leanAmt) * leanReach, maxOff) * side;
       // 壁に近づく方向は速く（壁に入らないよう）、それ以外はゆっくり追従
       const fast = Math.abs(leanTarget) < Math.abs(this.leanOff);
-      this.leanOff += (leanTarget - this.leanOff) * (1 - Math.exp(-dt * (fast ? 25 : 12)));
+      if (fast) this.leanOff += (leanTarget - this.leanOff) * (1 - Math.exp(-dt * 24));
+      else this.leanOff += (leanTarget - this.leanOff) * (1 - Math.exp(-dt * 12));
 
       // ---- カメラ ----
       const cam = G.camera;
       // 視点のわずかな上下・左右の揺れ（歩幅に同期、照準中は小さく）
       const spd = Math.hypot(this.vel.x, this.vel.z);
-      this.bobK = (this.bobK || 0) + ((Math.min(1, spd / 3.3) * (1 - this.adsT * 0.8)) - (this.bobK || 0)) * (1 - Math.exp(-dt * 6));
+      this.bobK = (this.bobK || 0) + (((this.grounded ? Math.min(1, spd / 3.3) : 0) * (1 - this.adsT * 0.8)) - (this.bobK || 0)) * (1 - Math.exp(-dt * 6));
       const bobAmp = (this.sprinting ? 0.03 : this.posture === 'stand' ? 0.014 : this.posture === 'crouch' ? 0.008 : 0.004) * this.bobK;
       const bobY = -Math.abs(Math.sin(this.bobPhase || 0)) * bobAmp + bobAmp * 0.5;
       const bobX = Math.cos(this.bobPhase || 0) * bobAmp * 0.5;
       // 横移動で視点がほんの少し傾く
       const localX = this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw);
       this.strafeRoll = (this.strafeRoll || 0) + ((-localX * 0.004) - (this.strafeRoll || 0)) * (1 - Math.exp(-dt * 8));
-      const want = V3(this.pos.x + r.x * (this.leanOff + bobX), this.eyeH - Math.abs(this.leanAmt) * 0.06 + bobY, this.pos.z + r.z * (this.leanOff + bobX));
+      const want = V3(this.pos.x + r.x * (this.leanOff + bobX), this.pos.y + this.eyeH - Math.abs(this.leanAmt) * (proneLean ? 0.025 : 0.06) + bobY, this.pos.z + r.z * (this.leanOff + bobX));
       if (this.camInit) {
-        const jump = want.distanceTo(cam.position), allowed = moved + 0.09 + Math.abs(POSTURE[this.posture].eye - this.eyeH) * 0.5;
+        const jump = want.distanceTo(cam.position), allowed = moved + Math.abs(this.pos.y - before.y) + 0.09 + Math.abs(POSTURE[this.posture].eye - this.eyeH) * 0.5;
         // 小さな急な跳び（壁際の押し戻しなど）は数フレームに分けてなめらかに。大きな移動（位置の付け替え）はそのまま
         if (jump > allowed && jump < 1.0) want.lerp(cam.position, 1 - allowed / jump);
+      }
+      // Resolve the smoothed camera too: smoothing must never put the eye through a wall.
+      const anchor = V3(this.pos.x, this.pos.y + this.eyeH, this.pos.z);
+      const safe = p => !G.World.overlapsSphere(p.x,p.y,p.z,.13);
+      if (!safe(want)) {
+        let lo=0, hi=1;
+        for(let i=0;i<10;i++){const k=(lo+hi)/2;const p=anchor.clone().lerp(want,k);if(safe(p))lo=k;else hi=k;}
+        want.copy(anchor.lerp(want,lo));
+      }
+      // Approach a newly clamped eye position without snapping around a window edge.
+      if(this.camInit&&safe(cam.position)){
+        const distance=want.distanceTo(cam.position),limit=moved+Math.abs(this.pos.y-before.y)+dt*2.7+Math.abs(POSTURE[this.posture].eye-this.eyeH)*.5;
+        if(distance>limit&&distance<1){
+          want.lerp(cam.position,1-limit/distance);
+          if(!safe(want)){let lo=0,hi=1;for(let i=0;i<10;i++){const k=(lo+hi)/2;if(safe(cam.position.clone().lerp(want,k)))lo=k;else hi=k;}want.copy(cam.position.clone().lerp(want,lo));}
+        }
       }
       this.camInit = true;
       cam.position.copy(want);
       this.shake = Math.max(0, (this.shake || 0) - dt * 1.6);
       const sh = this.shake * this.shake * 0.03;
       // 画面の傾きは、実際にカメラが横へずれた量に合わせる（壁際で横にずれられないのに傾きだけ残らないように）
-      const leanVisual = this.leanOff / 0.42;
-      cam.rotation.set(this.pitch + this.recoil + (Math.random() - 0.5) * sh, this.yaw + (Math.random() - 0.5) * sh, -leanVisual * 0.19 + this.strafeRoll + (Math.random() - 0.5) * sh, 'YXZ');
+      const leanVisual = clamp(this.leanOff / leanReach, -1, 1);
+      cam.rotation.set(this.pitch + this.recoil + (Math.random() - 0.5) * sh, this.yaw + (Math.random() - 0.5) * sh, -leanVisual * (proneLean ? 0.15 : 0.19) + this.strafeRoll + (Math.random() - 0.5) * sh, 'YXZ');
       this.localX = localX;
       cam.fov = fov; cam.updateProjectionMatrix();
 
@@ -292,17 +503,33 @@
       this.fireCD -= dt; this.pumpT -= dt;
       const Wp = this.W();
       const pressed = fireBtn && !this.prevFire; this.prevFire = fireBtn;
-      // ショットガンの1発ずつ装填中に引き金を引いたら、今の1発を入れて装填をやめる
-      if (fireBtn && this.reloading && this.cur === 'shotgun' && this.ammo > 0) G.Viewmodel.stopShellReload();
-      const canFire = !this.reloading && this.knifeT < 0 && !this.sprinting && !this.dead && !busy && this.pumpT <= 0;
-      if (fireBtn && canFire && (Wp.auto || pressed)) {
+      const vm = G.Viewmodel.state;
+      // The movement state can finish before the first-person weapon has risen on screen.
+      const poseReady = vm.sprint <= 0.16 && vm.gK <= 0.16 && (vm.lowK || 0) <= 0.16 && vm.gThrowT < 0 && vm.knifeT < 0 && !vm.sw && !vm.att;
+      this.fireQueueT = Math.max(0, this.fireQueueT - dt);
+      if (pressed && !poseReady && !busy && !this.reloading && !this.sprinting) this.fireQueueT = 0.42;
+      // 装填済みの弾があれば、引き金で装填を即中断して同じフレームで撃つ。
+      // 空のときは、最初の1発が入った時点で発射する予約になる。
+      let forceShot = false;
+      if (this.reloading && this.cur === 'shotgun') {
+        if (pressed) this.fireWhenLoaded = true;
+        if ((fireBtn || this.fireWhenLoaded) && this.ammo > 0 && this.pumpT <= 0 && !busy && poseReady) {
+          forceShot = this.fireWhenLoaded;
+          this.fireWhenLoaded = false;
+          this.reloading = false;
+          G.Viewmodel.cancelReload();
+        }
+      } else this.fireWhenLoaded = false;
+      const queuedShot = this.fireQueueT > 0 && poseReady;
+      const canFire = poseReady && !this.reloading && this.knifeT < 0 && !this.sprinting && !this.dead && !busy && this.pumpT <= 0;
+      if ((fireBtn || forceShot || queuedShot) && canFire && (Wp.auto || pressed || forceShot || queuedShot)) {
         if (this.ammo <= 0) {
           if (!this.dryFired) { G.Audio.dryClick(); HUD.msg(`${G.keyName(G.Input.binds.reload)} でリロード`); this.dryFired = true; }
         } else if (Wp.auto) {
           let n = 0;
-          while (this.fireCD <= 0 && this.ammo > 0 && n < 3) { this.shoot(); this.fireCD += Wp.interval; n++; }
+          while (this.fireCD <= 0 && this.ammo > 0 && n < 3) { this.shoot(); this.fireQueueT = 0; this.fireCD += Wp.interval; n++; }
         } else if (this.fireCD <= 0) {
-          this.shoot(); this.fireCD = Wp.interval;
+          this.shoot(); this.fireQueueT = 0; this.fireCD = Wp.interval;
           if (this.cur === 'shotgun' && this.ammo > 0) { this.pumpT = 0.12 + G.Viewmodel.PUMP_TIME; this.pumpPending = 0.12; }
           if (this.cur === 'pistol' && this.ammo === 0) G.Viewmodel.state.slideLock = true;
         }
@@ -324,13 +551,13 @@
         G.Grenades.preview(this.throwOrigin(), v);
         if (!gBtn) {
           this.gHold = false; this.grenades--; this.gCD = 0.7;
-          G.Viewmodel.grenadeThrow(); G.Grenades.preview(null);
+          G.Viewmodel.grenadeThrow(); G.Grenades.preview(null); G.Audio.grenadeThrow();
           this.throwPending = 0.11;   // 腕を振り出してから手を離す
           HUD.weapons();
         }
       }
-      if (this.throwPending > 0) { this.throwPending -= dt; if (this.throwPending <= 0) { G.Grenades.throw(this.throwOrigin(), this.throwVelocity(), true); G.Audio.reload('spoon'); } }
-      if (this.pumpPending > 0) { this.pumpPending -= dt; if (this.pumpPending <= 0 && this.cur === 'shotgun') G.Viewmodel.pump(); }
+      if (this.throwPending > 0) { this.throwPending -= dt; if (this.throwPending <= 0) G.Grenades.throw(this.throwOrigin(), this.throwVelocity(), true); }
+      if (this.pumpPending > 0) { this.pumpPending -= dt; if (this.pumpPending <= 0 && this.cur === 'shotgun') G.Viewmodel.pump(true); }
 
       // ---- ナイフ ----
       this.knifeCD -= dt;
@@ -363,6 +590,7 @@
       if (this.ammo >= Wp.mag) { HUD.msg('弾倉は満タンです'); return; }
       if (this.reserve <= 0) { HUD.msg('予備弾がありません'); return; }
       this.reloading = true;
+      this.fireWhenLoaded = false; this.fireQueueT = 0;
       this.reloadEmpty = this.ammo === 0;
       if (this.cur === 'shotgun') { this.pumpT = 0; G.Viewmodel.startShellReload(Math.min(Wp.mag - this.ammo, this.reserve), this.reloadEmpty); }
       else G.Viewmodel.startReload(this.reloadEmpty);
@@ -383,24 +611,20 @@
       G.Viewmodel.startKnife();
     },
     resolveKnife() {
-      const cam = G.camera, f = V3(0, 0, -1).applyQuaternion(cam.quaternion); f.y = 0; f.normalize();
-      let best = null, bestD = 99;
+      const cam = G.camera, f = V3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
+      const wall = G.World.raycast(cam.position.x, cam.position.y, cam.position.z, f.x, f.y, f.z, 1.75);
+      let best = null, hit = null, bestD = wall ? wall.t : 1.75;
       for (const e of G.Enemies.list) {
         if (e.dead) continue;
-        const dx = e.pos.x - this.pos.x, dz = e.pos.z - this.pos.z, d = Math.hypot(dx, dz);
-        if (d > 1.75) continue;
-        if ((dx * f.x + dz * f.z) / Math.max(d, 1e-4) < 0.72 && d > 0.6) continue;
-        const chestY = 1.15 - e.crouchK * 0.45;
-        const targetY = clamp(cam.position.y, 0.3, chestY);
-        if (!G.World.lineOfSight(cam.position.x, cam.position.y, cam.position.z, e.pos.x, targetY, e.pos.z)) continue;
-        if (d < bestD) { bestD = d; best = e; }
+        const h = G.Humanoid.rayParts(e.body, cam.position, f, bestD, true);
+        if (h) { bestD = h.t; best = e; hit = h; }
       }
       G.Audio.knife(!!best);
       G.Enemies.broadcast(V3(this.pos.x, 1, this.pos.z), 4, 'knife', true, null);
       if (best) {
-        const bp = new THREE.Vector3(best.pos.x, 1.1 - best.crouchK * 0.4, best.pos.z);
-        G.Effects.bloodHit(bp, bp.clone().sub(cam.position).normalize(), true);
-        const killed = best.damage(150, 'body', this.pos.clone().setY(1.4));
+        const bp = cam.position.clone().addScaledVector(f, bestD);
+        G.Effects.bloodHit(bp, f, false);
+        const killed = best.stab(hit.part, cam.position, hit.side);
         HUD.hitmarker(false, killed);
         if (killed) this.kills++;
       }
@@ -414,11 +638,11 @@
       const cam = G.camera;
       // 弾の方向：今見ている方向（＝画面中央）＋ばらつき。反動はこの後で視点に加える
       const aimed = this.adsT > 0.85;
-      let spread = aimed ? Wp.spreadAds : Wp.spreadHip + (this.moving ? Wp.spreadMove : 0);
+      let spread = (aimed ? Wp.spreadAds * (this.armLost && this.cur !== 'pistol' ? 6 : 1) : Wp.spreadHip + (this.moving ? Wp.spreadMove : 0)) * this.armWound() * this.oneArmK();
       if (!aimed && Wp.pellets === 1) spread *= this.posture === 'crouch' ? 0.8 : this.posture === 'prone' ? 0.6 : 1;
       const o = cam.position.clone();
       // ショットガンは散弾（複数の弾）。敵ごとに当たった弾の威力を合計し、血の演出は1回にまとめる
-      const perEnemy = new Map();
+      const perEnemy = new Map(), woodHits = new Map();
       let wallHits = 0;
       for (let p = 0; p < Wp.pellets; p++) {
         const d = V3(0, 0, -1);
@@ -430,26 +654,62 @@
         const wh = pr.hit;
         let maxT = wh ? wh.t : Wp.range, hitE = null, hitPart = null, hitSide = 0;
         for (const e of G.Enemies.list) { const h = e.rayHit(o, d, maxT); if (h) { maxT = h.t; hitE = e; hitPart = h.part; hitSide = h.side; } }
+        // 仲間の体に先に当たれば誤射
+        let hitAlly = null, allyPart = null;
+        for (const a of G.Allies.list) { if (a.dead) continue; const h = G.Humanoid.rayParts(a.body, o, d, maxT); if (h) { maxT = h.t; hitAlly = a; allyPart = h.part; hitE = null; } }
+        if (hitAlly) {
+          const dmgA = ({ head: 999, body: 30, stomach: 26, legs: 20, arms: 18 })[allyPart] * (Wp.pellets > 1 ? 0.45 : 1);
+          hitAlly.hurt(dmgA, this.pos.clone().setY(1.4), allyPart === 'legs' ? 'leg' : allyPart === 'arms' ? 'arm' : allyPart === 'head' ? 'head' : 'torso');
+          G.Effects.bloodHit(o.clone().addScaledVector(d, maxT), d.clone(), false);
+          if (p === 0) HUD.msg(hitAlly.name + 'を撃ってしまった！', 2);
+          continue;
+        }
         // 弾が通った木の壁に、表と裏の穴と木くず
         for (const wd of pr.woods) {
           if (wd.t > maxT) break;
+          const woodKey=wd.cx+','+wd.cz;
+          if(!woodHits.has(woodKey))woodHits.set(woodKey,{hit:wd.in,cx:wd.cx,cz:wd.cz,dir:d.clone()});
           if (p < 4 || p % 3 === 0) { G.Effects.impact(wd.in, false, 'wood'); G.Effects.impact(wd.out, false, 'wood'); }
         }
         if (hitE) {
           let dmg = Wp.dmg[hitPart];
           const layers = pr.woods.filter(wd => wd.t < maxT).length;
           if (layers) dmg *= Math.pow(Wp.pen, layers);
+          const through = layers > 0;
           if (Wp.falloff) { const [n0, n1, mn] = Wp.falloff; dmg *= maxT <= n0 ? 1 : maxT >= n1 ? mn : 1 - (1 - mn) * (maxT - n0) / (n1 - n0); }
           const rec = perEnemy.get(hitE) || { dmg: 0, part: hitPart, side: hitSide, point: o.clone().addScaledVector(d, maxT), dir: d.clone(), head: false };
-          rec.dmg += dmg; if (hitPart === 'head') rec.head = true;
+          rec.dmg += dmg; if (hitPart === 'head') rec.head = true; if (through) rec.through = true;
+          // 部位ごと（左右も）に受けた量を合計しておく（欠損の判定用）
+          const pk = hitPart + (hitPart === 'arms' || hitPart === 'legs' ? (hitSide >= 0 ? 'L' : 'R') : '');
+          rec.by = rec.by || {}; const slot = rec.by[pk] || (rec.by[pk] = { dmg: 0, n: 0, part: hitPart, side: hitSide, point: o.clone().addScaledVector(d, maxT) });
+          slot.dmg += dmg; slot.n++;
           if (hitPart === 'head' || rec.part !== 'head') { rec.part = hitPart; rec.side = hitSide; }
           perEnemy.set(hitE, rec);
         } else if (wh && (wallHits++ < 5 || p % 2 === 0)) {
           G.Effects.impact(wh, false, wh.cx >= 0 && G.World.isWood(wh.cx, wh.cz) ? 'wood' : undefined);
         }
       }
+      for(const w of woodHits.values()) G.Destruction.damage(w.cx,w.cz,w.hit,this.cur,w.dir);
       for (const [e, rec] of perEnemy) {
-        const killed = e.damage(rec.dmg, rec.head ? 'head' : rec.part, this.pos.clone().setY(1.4), rec.side);
+        const partName = rec.head ? 'head' : rec.part;
+        let killed = e.damage(rec.dmg, partName, o, rec.side);
+        // ショットガンの近距離の集弾で、頭・腕（肘から先／肩から）・脚がもげる。
+        // 散弾は胴にも混ざって当たるので、部位ごとに受けた量で判定する（頭は約20、腕は約16、脚は約22以上でもげる）。
+        // 壁を貫通して弱まった散弾では欠損しない
+        if (this.cur === 'shotgun' && G.Game.dismember && !rec.through && rec.by) {
+          const need = { head: 20, arms: 16, legs: 22 };
+          let pick = null;
+          for (const k in rec.by) { const s = rec.by[k]; if (need[s.part] && s.dmg >= need[s.part] && (!pick || s.dmg / need[s.part] > pick.dmg / need[pick.part])) pick = s; }
+          if (pick) {
+            const spec = { part: pick.part, side: pick.side, dir: rec.dir.clone() };
+            if (pick.part === 'arms') spec.fore = G.Humanoid.isForearmHit(e.body, pick.point, pick.side);
+            if (pick.part === 'legs' && !e.dead) e.loseLeg(pick.side, rec.dir.clone());          // 生きていれば這って撃ってくる
+            else {
+              if (!e.dead) { e.hp = 0; e.die(1, 0, pick.part); killed = true; }
+              e.body.st.sever = spec;
+            }
+          }
+        }
         this.hits++; if (killed) this.kills++;
         G.Effects.bloodHit(rec.point, rec.dir, rec.head || killed || Wp.pellets > 1);
         G.Audio.fleshHit(rec.point);
@@ -460,10 +720,11 @@
       G.Pad.vibrate(Wp.pellets > 1 ? 0.7 : 0.25, 0.55, Wp.pellets > 1 ? 90 : 45);
       if (!sup) G.Effects.playerFlash(o.clone().addScaledVector(V3(0, 0, -1).applyQuaternion(cam.quaternion), 0.8));
       G.Audio.gunshot(null, true, this.cur, sup);
+      if (this.cur !== 'shotgun') G.Effects.ejectPlayerCasing(this.cur);
       G.Enemies.broadcast(V3(this.pos.x, 1.4, this.pos.z), Wp.noise * (sup ? 0.28 : 1), 'gunshot', true, null);   // サプレッサー付きは敵に聞こえる距離が約3割
       // 反動：一部は視点に残る（マウスで下へ補正が必要）、一部は滑らかに戻る
       const scoped = aimed && this.cur === 'ar' && G.Viewmodel.att.ar.optic === 'scope';
-      const k = Wp.kick * (scoped ? 0.75 / Math.sqrt(this.zoom / 2) : aimed ? 0.8 : 1) * (this.posture === 'prone' ? 0.6 : this.posture === 'crouch' ? 0.85 : 1);
+      const k = Wp.kick * (scoped ? 0.75 / Math.sqrt(this.zoom / 2) : aimed ? 0.8 : 1) * (this.posture === 'prone' ? 0.6 : this.posture === 'crouch' ? 0.85 : 1) * (this.armLost ? (this.cur === 'pistol' ? 1.4 : 2.2) : 1);
       this.pitch = clamp(this.pitch + k * 0.6, -1.45, 1.45);
       this.recoil += k * 0.55;
       this.yaw += (Math.random() - 0.5) * Wp.kickYaw * (scoped ? 0.6 : 1);
@@ -548,8 +809,15 @@
           if (!got.length) continue;
           HUD.msg('弾薬を拾った　' + got.join('　')); HUD.ammo(); HUD.weapons();
         } else {
-          if (P.hp >= 100) continue;
-          const add = Math.min(45, 100 - P.hp); P.hp += add; HUD.msg(`救急箱を使った　体力 +${Math.round(add)}`);
+          // 医療品の補給（体力は戻らない）。ポーチがいっぱいなら拾わない
+          const total = P.med.tq + P.med.hemo + P.med.band + (P.med.medicine || 0);
+          if (total >= MED_CAPACITY + 2) continue;
+          const got = [];
+          for (const [k, n] of [['band', 2], ['tq', 1], ['hemo', 1]]) {
+            const room = MED_CAPACITY + 2 - (P.med.tq + P.med.hemo + P.med.band + (P.med.medicine || 0));
+            const add = Math.min(n, room); if (add > 0) { P.med[k] += add; got.push(MED[k].name + '+' + add); }
+          }
+          HUD.msg('医療品を拾った　' + got.join('　')); HUD.medical();
         }
         G.Audio.reload('grab');
         this.scene.remove(p.mesh); this.list.splice(i, 1);
@@ -564,7 +832,31 @@
   const setClass = (id, cls, on) => { const k = id + '#' + cls; if (_hc[k] !== on) { _hc[k] = on; $(id).classList.toggle(cls, on); } };
   const HUD = G.HUD = {
     msgT: 0,
-    msg(t) { const m = $('msg'); m.textContent = t; m.classList.add('show'); this.msgT = 2.2; },
+    msg(t, sec) { const m = $('msg'); m.textContent = t; m.classList.add('show'); this.msgT = sec || 2.2; },
+    radio(speaker, line, japanese = '') { $('radio-speaker').textContent = speaker; $('radio-text').textContent = line; $('radio-ja').textContent = japanese; $('radio-line').classList.add('show'); this.radioT = 3; },
+    // 仲間の状態
+    allies() {
+      const el = $('allies'); if (!el) return;
+      $('squad-select').style.display = G.Allies.list.length ? '' : 'none';
+      if (!G.Allies.list.length) { el.textContent = ''; return; }
+      el.innerHTML = `<b>仲間　生存 ${G.Allies.alive().length} / ${G.Allies.list.length}</b>` + G.Allies.list.map(a => {
+        const hp = a.dead ? 0 : Math.max(0, Math.min(100, Math.ceil(a.hp)));
+        const st = a.dead ? '戦闘不能・指示不可' : a.treat ? '処置中' : a.crippled ? '匍匐のみ・射撃可能' : a.bleedRate() > 0 ? '出血中・処置が必要' : a.hp < 50 ? '負傷' : a.moveState === 'moving' ? '移動中' : a.moveState === 'holding' || G.Allies.mode === 'hold' ? '待機' : '追従';
+        return `<div class="ally-card ${a.dead ? 'dead' : a.bleedRate() > 0 || a.hp < 50 ? 'bad' : ''}" data-ally="${a.id}"><div class="ally-row"><strong>${a.name}</strong><span class="ally-state">${a.dead ? '✕ 死亡' : '● 生存'}</span><span class="ally-hp">${hp}/100</span></div><div class="ally-health"><i style="width:${hp}%"></i></div><small>${st}</small></div>`;
+      }).join('');
+    },
+    // 出血の状態と医療品の数
+    medical() {
+      const el = $('med'); if (!el) return;
+      const ws = P.wounds || [], md = P.med || { tq: 0, hemo: 0, band: 0, medicine: 0 };
+      const worst = ws.reduce((a, w) => (!a || w.rate > a.rate ? w : a), null);
+      const rate = P.bleedRate ? P.bleedRate() : 0;
+      const label = !worst ? '' : rate >= 1 ? '出血：激しい' : '出血：軽い';
+      const parts = ws.map(w => ({ torso: '胴', arm: '腕', leg: '脚' }[w.area] + (w.type === 'light' ? '（軽）' : w.packed ? '（押さえ）' : '（重）'))).join('・');
+      $('bleed').textContent = worst ? `${label}　${parts}　−${rate.toFixed(1)}/秒` : '';
+      el.classList.toggle('bleeding', !!worst); el.classList.toggle('heavy', rate >= 1);
+      $('med-items').textContent = `止血帯 ${md.tq}　止血剤 ${md.hemo}　包帯 ${md.band}　治療薬 ${md.medicine || 0}`;
+    },
     ammo() {
       $('ammo-cur').textContent = P.ammo; $('ammo-res').textContent = P.reserve;
       $('ammo').classList.toggle('low', P.ammo <= Math.max(2, Math.floor(P.W().mag / 4)));
@@ -574,14 +866,14 @@
     weapons() {
       const box = $('weapon-slots'); if (!box) return;
       const pad = G.Pad.connected() && performance.now() - G.Pad.lastUseT < 30000;
-      const keyOf = (id) => pad ? '' : G.keyName(G.Input.binds[id]);
+      const keyOf = (id) => (pad || G.Touch.active) ? '' : G.keyName(G.Input.binds[id]);
       box.innerHTML = ['ar', 'pistol', 'shotgun'].map((k, i) => `<span class="slot ${P.cur === k ? 'on' : ''}"><b>${keyOf('w' + (i + 1))}</b>${WEAPONS[k].short}</span>`).join('')
         + `<span class="slot gren ${P.grenades ? '' : 'empty'}"><b>${pad ? '' : keyOf('grenade')}</b>手りゅう弾 ×${P.grenades}</span>`;
     },
     // 操作の案内（開始時と、持ち替え・手りゅう弾を初めて使えるようになったとき）
     hint(force) {
       const pad = G.Pad.connected();
-      const t = pad
+      const t = G.Touch.active ? '左スティック：移動　画面をスワイプ：視点　射撃：長押し　照準：切替　手榴弾：長押し→離して投げる' : pad
         ? `${G.Pad.btnName(G.Pad.binds.nextWeapon)}：武器の持ち替え　${G.Pad.btnName(G.Pad.binds.grenade)}：長押しで手りゅう弾を構え、離して投げる　${G.Pad.btnName(G.Pad.binds.walk)}：ゆっくり歩く`
         : `${G.keyName(G.Input.binds.w1)}・${G.keyName(G.Input.binds.w2)}・${G.keyName(G.Input.binds.w3)} またはホイール：武器の持ち替え　${G.keyName(G.Input.binds.grenade)}：長押しで手りゅう弾を構え（軌道が出ます）、離して投げる　${G.keyName(G.Input.binds.walk)}：押している間ゆっくり歩く`;
       const el = $('hint'); el.textContent = t; el.classList.add('show');
@@ -606,14 +898,33 @@
     debug(on) { $('debug').classList.toggle('on', on); this.msg(on ? 'AI状態の表示：オン' : 'AI状態の表示：オフ'); },
     update(dt) {
       if (this.msgT > 0) { this.msgT -= dt; if (this.msgT <= 0) $('msg').classList.remove('show'); }
+      if (this.radioT > 0) { this.radioT -= dt; if (this.radioT <= 0) $('radio-line').classList.remove('show'); }
+      const marker = $('order-marker'), point = G.Allies.commandPoint;
+      if (point && G.Allies.commandAssigned.some(a => !a.dead && a.moveState === 'moving')) {
+        G.camera.updateMatrixWorld();
+        const clip = point.clone().setY(0.45).project(G.camera);
+        marker.classList.toggle('on', clip.z > -1 && clip.z < 1 && Math.abs(clip.x) < 1.1 && Math.abs(clip.y) < 1.1);
+        marker.style.left = ((clip.x + 1) * 50) + '%'; marker.style.top = ((1 - clip.y) * 50) + '%';
+      } else marker.classList.remove('on');
       setText('hp-num', String(Math.ceil(P.hp)));
       setStyle('hp-fill', 'width', P.hp + '%');
       setClass('hp', 'low', P.hp <= 35);
-      this.vig = Math.max((this.vig || 0) - dt * 2, P.hp <= 35 ? 0.45 : 0);
+      // 出血中は、画面の縁が脈打つように赤くなる（激しいほど強く）
+      const br = P.bleedRate ? P.bleedRate() : 0;
+      const pulse = br > 0 ? (0.12 + Math.min(0.35, br * 0.2)) * (0.6 + 0.4 * Math.sin(G.time * (br >= 1 ? 7 : 4))) : 0;
+      this.vig = Math.max((this.vig || 0) - dt * 2, P.hp <= 35 ? 0.45 : 0, pulse);
+      // 処置の進み具合
+      const tb = $('treatbar');
+      if (tb) {
+        tb.classList.toggle('on', !!P.treat);
+        if (P.treat) { tb.querySelector('i').style.width = Math.min(100, P.treat.t / P.treat.dur * 100) + '%'; tb.querySelector('span').textContent = (P.treat.full ? G.MED[P.treat.item].name : '包帯（代用）') + 'で処置中'; }
+      }
+      this.medT = (this.medT || 0) - dt; if (this.medT <= 0) { this.medT = 0.25; this.medical(); this.allies(); }
       setStyle('vignette', 'opacity', (Math.round(this.vig * 20) / 20).toString());
-      setText('posture', { stand: '立ち', crouch: 'しゃがみ', prone: '匍匐' }[P.posture] + (P.sprinting ? '・ダッシュ' : P.walkK < 1 ? `・歩く速さ ${Math.round(P.walkK * 100)}%` : '') + (P.lean ? (P.lean < 0 ? '・左リーン' : '・右リーン') : ''));
+      setText('posture', (P.crippled ? (P.legLost ? '脚を失った・這うだけ' : '脚を負傷・這うだけ') : { stand: '立ち', crouch: 'しゃがみ', prone: '匍匐' }[P.posture]) + (P.sprinting ? '・ダッシュ' : P.walkK < 1 ? `・歩く速さ ${Math.round(P.walkK * 100)}%` : '') + (P.lean ? (P.lean < 0 ? '・左リーン' : '・右リーン') : ''));
       const optic = G.Viewmodel.att.ar.optic;
       setClass('scope', 'on', P.adsT > 0.75 && P.cur === 'ar' && optic === 'scope');
+      if(P.adsT>.75&&optic==='scope'){setStyle('scope','--glint-x',(32+Math.sin(P.yaw)*9)+'%');setStyle('scope','--glint-y',(23-P.pitch*7)+'%');}
       setClass('reddot', 'on', P.adsT > 0.8 && P.cur === 'ar' && optic === 'dot');
       setClass('crosshair', 'hide', P.adsT > 0.2 || P.sprinting || P.knifeT >= 0);
       const gap = 6 + (P.moving ? 10 : 0) + (P.posture === 'stand' ? 3 : 0) + (G.time - P.lastShotT < 0.15 ? 5 : 0);
@@ -700,6 +1011,9 @@
       G.camera.rotation.order = 'YXZ';
       G.maxAniso = renderer.capabilities.getMaxAnisotropy();
       G.World.build(scene);
+      G.Surfaces.init(scene);
+      G.Destruction.init(scene);
+      G.Physics.init(scene);
       G.Effects.init(scene);
       G.Viewmodel.init(renderer);
       G.linearize(scene); G.linearize(G.Viewmodel.scene);
@@ -731,6 +1045,7 @@
       } catch (e) { console.warn('画面効果を使えません', e); this.composer = null; }
       G.Input.init();
       G.Pad.init();
+      G.Touch.init();
       const saved = G.Storage.get('cq_settings_v1') || {};
       this.sensitivity = typeof saved.sens === 'number' ? saved.sens : 1;
       this.difficulty = typeof saved.diff === 'number' ? saved.diff : 1;
@@ -741,11 +1056,16 @@
       G.Input.touchpadGuard = !!saved.tp;
       this.rawMouse = !!saved.raw;
       if (typeof saved.stepVol === 'number') G.Audio.stepVol = saved.stepVol;
-      this.wheelMode = saved.wheel === 'weapon' ? 'weapon' : 'speed';
+      this.wheelMode = 'weapon';
+      // 部位の欠損：今回から初期設定をオンに（以前の「オフ」の保存値は引き継がない）
+      this.dismember = typeof saved.dm2 === 'boolean' ? saved.dm2 : true;
       this.team = saved.team === 'blue' ? 'blue' : 'red';
+      this.allyCount = [0, 1, 2].includes(saved.allies) ? saved.allies : 2;
       this.loadout = Object.assign({ optic: 'scope', arSup: false, pistolSup: false }, saved.loadout || {});
+      this.loadout.med = Object.assign({ tq: 1, hemo: 1, band: 2, medicine: 1 }, this.loadout.med || {});
+      this.loadoutReady = false;
       this.isTouch = matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
-      if (this.isTouch && !saved.q) saved.q = 'low';
+      if (this.isTouch && !saved.q) this.quality = 'low';
       this.autoRes = saved.autoRes !== false;
       this.resScale = 1;
       G.time = 0;
@@ -755,12 +1075,14 @@
       window.addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); if (this.composer) { this.composer.setPixelRatio(renderer.getPixelRatio()); this.composer.setSize(innerWidth, innerHeight); } G.camera.aspect = innerWidth / innerHeight; G.camera.updateProjectionMatrix(); G.Viewmodel.resize(); });
       document.addEventListener('pointerlockchange', () => this.onLockChange());
       document.addEventListener('pointerlockerror', () => { Menu.note('マウスを固定できませんでした。もう一度ボタンを押してください（Escの直後は1秒ほど待つ必要があります）。'); });
+      window.addEventListener('blur', () => { if (this.state === 'playing' && !this.testMode) this.pause(); });
+      document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing' && !this.testMode) this.pause(); });
       this.last = performance.now();
       G.Audio.prepare();
       requestAnimationFrame((t) => this.frame(t));
       if (this.testMode) { this.state = 'playing'; G.Input.enabled = true; Menu.show(null); }
     },
-    saveSettings() { return G.Storage.set('cq_settings_v1', { sens: this.sensitivity, diff: this.difficulty, fs: this.fullscreen, q: this.quality, fps: this.showFps, gore: this.gore, tp: G.Input.touchpadGuard, raw: this.rawMouse, autoRes: this.autoRes, stepVol: G.Audio.stepVol, wheel: this.wheelMode, team: this.team, loadout: this.loadout }); },
+    saveSettings() { return G.Storage.set('cq_settings_v1', { sens: this.sensitivity, diff: this.difficulty, fs: this.fullscreen, q: this.quality, fps: this.showFps, gore: this.gore, tp: G.Input.touchpadGuard, raw: this.rawMouse, autoRes: this.autoRes, stepVol: G.Audio.stepVol, wheel: this.wheelMode, dm2: this.dismember, team: this.team, allies: this.allyCount, loadout: this.loadout }); },
     applyLoadout() {
       const L = this.loadout, VM = G.Viewmodel;
       VM.setOptic(L.optic === 'dot' ? 'dot' : 'scope');
@@ -785,13 +1107,14 @@
     },
 
     reset() {
-      if (this.deathCam) { this.scene.remove(this.deathCam.body.root); if (this.deathCam.body.st.gunDropped) this.scene.remove(this.deathCam.body.gun); this.deathCam = null; }
+      if (this.deathCam) { this.scene.remove(this.deathCam.body.root); if (this.deathCam.body.st.gunDropped) this.scene.remove(this.deathCam.body.gun); this.deathCam.body.dispose(); this.deathCam = null; }
+      G.Physics.reset(); G.Audio.stopEnemyVoices(); G.Destruction.reset(); G.World.resetCrates();
       G.Grenades.reset(this.scene);
       P.camInit = false;
-      G.Viewmodel.cancelReload();
-      G.Viewmodel.state.knifeT = -1; G.Viewmodel.knife.visible = false; G.Viewmodel.knifeArm.g.visible = false;
+      G.Viewmodel.resetActions();
       G.Effects.reset();
       P.reset();
+      G.Allies.reset(this.scene);
       G.Enemies.spawn(this.scene);
       G.Pickups.reset(this.scene);
       G.Input.clear();
@@ -803,10 +1126,13 @@
       this.ended = false; this.elapsed = 0;
       // 最初のカメラ位置
       P.update(0.0001, [], { dx: 0, dy: 0, wheel: 0 });
+      G.Effects.warmShooting(this.renderer, G.camera);
     },
 
     begin() {
+      if (this.state === 'menu' && !this.loadoutReady) { Menu.panel('loadout'); return; }
       G.Audio.init();
+      G.Audio.ambience(true);
       if (this.ended) this.reset();
       if (this.fullscreen && !document.fullscreenElement && document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().then(() => {
@@ -815,12 +1141,12 @@
         }).catch(() => { });
       }
       // コントローラーがつながっていれば、マウスを固定せずに始める（タブレットでも遊べる）
-      if (G.Pad.connected()) {
+      if (G.Pad.connected() || G.Touch.active) {
         this.state = 'playing'; G.Input.enabled = !this.deathCam; G.Input.clear(); Menu.show(null);
         if (!this.hinted) { this.hinted = true; HUD.hint(true); }
         return;
       }
-      if (this.isTouch) { Menu.note('タブレットではゲームコントローラーをつないでください（Bluetooth接続後、コントローラーのボタンを1回押すと認識されます）。'); return; }
+      if (this.isTouch) { Menu.note('設定の「画面の操作ボタン」を自動または表示にすると、タッチ操作で遊べます。'); return; }
       const c = $('view');
       const plain = () => {
         try {
@@ -846,10 +1172,12 @@
     // ---- やられたとき：カメラを後ろへ引き、自分の体が倒れるところを見せる ----
     startDeathCam(from) {
       if (this.deathCam) return;
-      G.Input.enabled = false;
-      const b = G.Humanoid.create({ style: 'swat', team: this.team }); this.scene.add(b.root);
+      G.Input.enabled = false; G.Input.clear(); G.Touch.sync();
+      const b = G.Humanoid.create({ style: 'swat', team: this.team, gear: 'helmet-sunglasses' }); this.scene.add(b.root);
       b.onSound = (kind, p) => { const at = p ? p.clone() : b.hipsWorld.clone(); if (kind === 'knee') G.Audio.kneeDrop(at); else if (kind === 'fall') G.Audio.bodyFall(at, 1.2); else if (kind === 'gun') G.Audio.gunClatter(at); };
-      b.root.position.set(P.pos.x, 0, P.pos.z); b.root.rotation.y = P.yaw + Math.PI;
+      b.root.position.copy(P.pos); b.root.rotation.y = P.yaw + Math.PI;
+      if (P.legLost) G.Physics.applyMissing(b, 'leg' + P.legLost);
+      if (P.armLost) G.Physics.applyMissing(b, 'arm' + P.armLost);
       const st = b.st; st.crouch = P.posture === 'crouch' ? 1 : 0; st.prone = P.posture === 'prone' ? 1 : 0; st.aim = 1;
       // 撃たれた方向：体の正面から撃たれたら後ろへ倒れる
       const fwd = V3(-Math.sin(P.yaw), 0, -Math.cos(P.yaw));
@@ -859,7 +1187,8 @@
       let pick = cands[0];
       for (const c of cands) { if (!c[2]) { pick = c; break; } const h = G.World.raycast(P.pos.x, 0.5, P.pos.z, c[2].x, 0, c[2].z, 2.0); if (!h) { pick = c; break; } }
       b.update({ dt: 1 / 60, speed: 0, crouch: st.crouch, aim: 1, aimPitch: 0, twist: 0, reload: -1, scene: this.scene });
-      b.die(pick[0], pick[1]);
+      b.die(pick[0], pick[1], !!P.headLost);
+      if (P.headLost && G.Game.dismember) b.st.sever = { part: 'head', side: 0, dir: toShooter.clone().negate() };   // 至近距離のショットガンで頭が飛ぶ
       // カメラの行き先：体の後ろ上方。壁があれば手前で止める
       const back = toShooter.clone().negate().add(V3(0.35, 0, 0.35)).normalize();
       const head = V3(P.pos.x, 1.4, P.pos.z);
@@ -881,22 +1210,26 @@
       G.camera.lookAt(look);
       G.camera.fov += (70 - G.camera.fov) * Math.min(1, dt * 4); G.camera.updateProjectionMatrix();
       D.body.update({ dt, speed: 0, crouch: 0, aim: 0, aimPitch: 0, twist: 0, reload: -1, scene: this.scene });
+      G.Allies.update(dt, P);
       G.Enemies.update(dt, P);
+      G.Physics.update(dt);
       G.Effects.update(dt); G.World.update(dt); G.Grenades.update(dt);
       G.Audio.updateListener(G.camera);
       HUD.update(dt);
-      if (D.t > 3.6) this.end(false);
+      if (D.t > 5.2) this.end(false);
     },
     padPause() {
       if (document.pointerLockElement) document.exitPointerLock(); else this.pause();
     },
     pause() {
       this.state = 'paused'; G.Input.enabled = false; G.Input.clear();
+      G.Audio.ambience(false);
       Menu.show('pause');
     },
     end(win) {
       if (this.ended) return;
       this.ended = true; this.state = 'ended'; G.Input.enabled = false; G.Input.clear();
+      G.Audio.ambience(false);
       G.Audio.jingle(win);
       const acc = P.shots ? Math.round(P.hits / P.shots * 100) : 0;
       $('end-title').textContent = win ? '任務完了' : '戦闘不能';
@@ -951,7 +1284,7 @@
       const vr = G.Viewmodel.update({
         dt, time: G.time, moveSpeed: Math.min(1, Math.hypot(P.vel.x, P.vel.z) / 3.3), sprint: P.sprinting,
         ads: P.adsT, posture: P.posture === 'stand' ? 0 : P.posture === 'crouch' ? 1 : 2,
-        lean: P.leanAmt, mdx: mouse.dx, mdy: mouse.dy, bobPhase: P.bobPhase || 0, wall: 0, strafe: Math.max(-1, Math.min(1, (P.localX || 0) / 3.3)),
+        lean: clamp(P.leanOff / (P.posture === 'prone' ? 0.26 : 0.42), -1, 1), mdx: mouse.dx, mdy: mouse.dy, bobPhase: P.bobPhase || 0, wall: 0, strafe: Math.max(-1, Math.min(1, (P.localX || 0) / 3.3)),
       });
       G.Pickups.update(dt);
       if (vr === 'shell' && P.reloading) { P.shellIn(); HUD.ammo(); }
@@ -959,7 +1292,9 @@
       G.Viewmodel.setVisible(P.adsT < 0.75 || P.cur !== 'ar' || G.Viewmodel.att.ar.optic === 'dot');
       G.Grenades.update(dt);
       if (this.state !== 'playing') return; // 射撃などでゲームが終わった場合
+      G.Allies.update(dt, P);
       G.Enemies.update(dt, P);
+      G.Physics.update(dt);
       G.Effects.update(dt);
       G.World.update(dt);
       G.Audio.updateListener(G.camera);
@@ -985,11 +1320,13 @@
   // ======================= メニュー =======================
   const Menu = G.Menu = {
     init() {
-      $('btn-start').onclick = () => Game.begin();
+      $('btn-start').onclick = () => this.panel('loadout');
+      $('btn-deploy').onclick = () => { Game.loadoutReady = true; Game.reset(); Game.begin(); };
       $('btn-resume').onclick = () => Game.begin();
-      $('btn-restart').onclick = () => { Game.reset(); Game.begin(); };
-      $('btn-retry').onclick = () => { Game.reset(); Game.begin(); };
-      $('btn-end-menu').onclick = () => { Game.reset(); this.show('main'); };
+      const prepareSortie = () => { Game.state = 'menu'; Game.loadoutReady = false; Game.reset(); this.show('main'); this.panel('loadout'); };
+      $('btn-restart').onclick = prepareSortie;
+      $('btn-retry').onclick = prepareSortie;
+      $('btn-end-menu').onclick = () => { Game.state = 'menu'; Game.loadoutReady = false; Game.reset(); this.show('main'); };
       for (const b of document.querySelectorAll('[data-open]')) b.onclick = () => this.panel(b.dataset.open);
       for (const b of document.querySelectorAll('[data-close]')) b.onclick = () => this.panel(null);
       $('btn-reset-keys').onclick = () => { const ok = G.Input.resetBinds(); this.renderKeys(); this.keyNote(ok ? '初期設定に戻しました。' : '初期設定に戻しましたが、保存できませんでした。次回起動時には元に戻ります。'); };
@@ -1010,9 +1347,30 @@
       const lo = $('lo-optic'), las = $('lo-arsup'), lps = $('lo-pistolsup');
       const syncLo = () => { lo.value = Game.loadout.optic; las.checked = !!Game.loadout.arSup; lps.checked = !!Game.loadout.pistolSup; };
       syncLo();
-      const onLo = () => { Game.loadout = { optic: lo.value, arSup: las.checked, pistolSup: lps.checked }; Game.applyLoadout(); Game.saveSettings(); this.loadoutSummary(); };
+      const onLo = () => { Game.loadout = { optic: lo.value, arSup: las.checked, pistolSup: lps.checked, med: Game.loadout.med }; Game.applyLoadout(); Game.saveSettings(); this.loadoutSummary(); };
+      // 医療品（ポーチに入る数まで）
+      const medUI = () => {
+        const md = Game.loadout.med, used = md.tq + md.hemo + md.band + md.medicine;
+        for (const k of ['tq', 'hemo', 'band', 'medicine']) $('lo-' + k).textContent = md[k];
+        $('lo-med-room').textContent = `ポーチの空き ${MED_CAPACITY - used} / ${MED_CAPACITY}`;
+      };
+      for (const b of document.querySelectorAll('[data-med]')) b.onclick = () => {
+        const k = b.dataset.med, d = +b.dataset.d, md = Game.loadout.med, used = md.tq + md.hemo + md.band + md.medicine;
+        if (d > 0 && used >= MED_CAPACITY) return;
+        md[k] = Math.max(0, Math.min(4, md[k] + d));
+        Game.saveSettings(); medUI(); this.loadoutSummary();
+        if (Game.state === 'menu') P.med = { ...md };
+      };
+      medUI();
       lo.onchange = onLo; las.onchange = onLo; lps.onchange = onLo;
       this.loadoutSummary();
+      const ac = $('ally-count'); ac.value = String(Game.allyCount);
+      const allyRadios = [...document.querySelectorAll('input[name="lo-allies"]')];
+      const syncAllies = () => { ac.value = String(Game.allyCount); for (const radio of allyRadios) radio.checked = +radio.value === Game.allyCount; this.loadoutSummary(); };
+      const setAllies = value => { Game.allyCount = value; Game.saveSettings(); if (Game.state === 'menu') Game.reset(); syncAllies(); };
+      ac.onchange = () => setAllies(+ac.value);
+      for (const radio of allyRadios) radio.onchange = () => { if (radio.checked) setAllies(+radio.value); };
+      syncAllies();
       const tm = $('team'); tm.value = Game.team; G.Viewmodel.setTeam(Game.team);
       tm.onchange = () => { Game.team = tm.value; G.Viewmodel.setTeam(Game.team); Game.saveSettings(); };
       const wm = $('wheelmode'); wm.value = Game.wheelMode;
@@ -1023,6 +1381,11 @@
       raw.onchange = () => { Game.rawMouse = raw.value === 'raw'; Game.saveSettings(); };
       const ar = $('autores'); ar.checked = Game.autoRes;
       ar.onchange = () => { Game.autoRes = ar.checked; if (!ar.checked) { Game.resScale = 1; Game.applyQuality(); } Game.saveSettings(); };
+      const dismember = $('dismember'); dismember.checked = Game.dismember;
+      dismember.onchange = () => { Game.dismember = dismember.checked; Game.saveSettings(); };
+      const touchMode = $('touch-mode'); touchMode.value = G.Touch.mode;
+      touchMode.onchange = () => G.Touch.setMode(touchMode.value);
+      $('btn-voice-preview').onclick = () => { G.Audio.init(); G.Audio.playerVoice('hurt'); };
       const tp = $('touchpad'); tp.checked = G.Input.touchpadGuard;
       tp.onchange = () => { G.Input.touchpadGuard = tp.checked; Game.saveSettings(); };
       const gore = $('gore'); gore.value = Game.gore;
@@ -1049,6 +1412,7 @@
       this.show('main');
     },
     show(which) {
+      G.Touch.sync();
       $('menu').classList.toggle('on', which === 'main' || which === 'pause');
       $('menu').dataset.mode = which || '';
       $('end').classList.toggle('on', which === 'end');
@@ -1059,13 +1423,16 @@
     panel(name) {
       for (const p of document.querySelectorAll('.panel')) p.classList.toggle('on', p.id === 'panel-' + name);
       $('menu-main').classList.toggle('dim', !!name);
+      if (name === 'loadout') $('btn-deploy').hidden = Game.state === 'paused';
       G.Input.rebinding = null;
       if (G.Pad) G.Pad.rebinding = null;
     },
     note(t) { $('menu-note').textContent = t; },
     loadoutSummary() {
       const L = Game.loadout;
-      $('loadout-sum').textContent = `装備：ライフル（${L.optic === 'dot' ? 'ドットサイト' : 'スコープ'}${L.arSup ? '・サプレッサー' : ''}）／ハンドガン${L.pistolSup ? '（サプレッサー）' : ''}／ショットガン／手りゅう弾×2`;
+      const md = L.med || { tq: 0, hemo: 0, band: 0, medicine: 0 };
+      const squad = Game.allyCount === 2 ? 'ALPHA＋BRAVO' : Game.allyCount === 1 ? 'ALPHA' : '単独';
+      $('loadout-sum').textContent = `同行：${squad}／装備：ライフル（${L.optic === 'dot' ? 'ドットサイト' : 'スコープ'}${L.arSup ? '・サプレッサー' : ''}）／ハンドガン${L.pistolSup ? '（サプレッサー）' : ''}／ショットガン／手りゅう弾×2／止血帯×${md.tq}・止血剤×${md.hemo}・包帯×${md.band}・治療薬×${md.medicine}`;
     },
     padNote(t) { $('pad-note').textContent = t; },
     padStatus() {
@@ -1101,7 +1468,7 @@
         tr.querySelector('button').onclick = () => { G.Input.rebinding = a.id; this.renderKeys(); this.keyNote('割り当てたいキーを押してください。すでに使われているキーなら、その操作と入れ替えます。'); };
         tb.appendChild(tr);
       }
-      for (const [k, v] of [['射撃', '左クリック（ライフルは長押しで連射）'], ['照準', '右クリック（押している間）'], ['ホイール', '照準中はスコープ倍率。それ以外は歩く速さ（設定で武器の持ち替えに変更可）'], ['手りゅう弾', '中央クリック（ホイール押し込み）を長押し → 離して投げる'], ['一時停止', 'Esc']]) {
+      for (const [k, v] of [['射撃', '左クリック（ライフルは長押しで連射）'], ['照準', '右クリック（押している間）'], ['ホイール', '照準中はスコープ倍率。それ以外は武器の持ち替え（Xを押している間は忍び歩き）'], ['手りゅう弾', '中央クリック（ホイール押し込み）を長押し → 離して投げる'], ['一時停止', 'Esc']]) {
         const tr = document.createElement('tr'); tr.className = 'fixed';
         tr.innerHTML = `<td>${k}</td><td><span class="key fixed">${v}</span></td>`; tb.appendChild(tr);
       }

@@ -83,6 +83,7 @@
     const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
     return t;
   }
+  function unitPatch(text){const c=document.createElement('canvas');c.width=256;c.height=64;const x=c.getContext('2d');x.fillStyle='#171b1e';x.fillRect(0,0,256,64);x.strokeStyle='#53585c';x.strokeRect(3,3,250,58);x.fillStyle='#c7c7bc';x.font='bold 37px sans-serif';x.textAlign='center';x.fillText(text,128,46);const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;return new THREE.MeshStandardMaterial({map:t,roughness:.95,skinning:true});}
   const TEAM_COLORS = { red: 0xb3241c, blue: 0x1f4fb8 };
   const MATSETS = {};
   // style: 'enemy'（迷彩）| 'swat'（黒）、team: 'red' | 'blue'（腕章の色）
@@ -100,6 +101,7 @@
       new THREE.MeshStandardMaterial({ color: lin(0x0b0c0d), roughness: 0.12, metalness: 0.7, skinning: true }), // 5 ゴーグル
       new THREE.MeshStandardMaterial({ color: lin(TEAM_COLORS[team] || TEAM_COLORS.red), roughness: 0.6, emissive: lin(TEAM_COLORS[team] || TEAM_COLORS.red), emissiveIntensity: 0.12, skinning: true }), // 6 腕章
     ];
+    set.push(new THREE.MeshStandardMaterial({color:lin(0xb18d72),roughness:.93,skinning:true}),new THREE.MeshStandardMaterial({color:lin(0x242321),roughness:1,skinning:true}),unitPatch('SEIATSU'));
     for (const m of set) m.envMapIntensity = 0.3;
     MATSETS[key] = set;
     return set;
@@ -116,6 +118,7 @@
       new THREE.MeshStandardMaterial({ color: lin(0x0b0c0d), roughness: 0.12, metalness: 0.7, skinning: true }), // 5 ゴーグル
     ];
     MATS.push(MATS[0]);   // 6 腕章の部分：敵は服と同じ（腕章なし）
+    MATS.push(new THREE.MeshStandardMaterial({color:lin(0xa98165),roughness:.93,skinning:true}),new THREE.MeshStandardMaterial({color:lin(0x292821),roughness:1,skinning:true}),unitPatch('UNIT'));
     for (const m of MATS) m.envMapIntensity = 0.3;
     return MATS;
   }
@@ -155,7 +158,9 @@
     P('hips', 0, rbox(0.38, 0.21, 0.26, 0.07), 0, -0.02, 0);
     P('hips', 1, rbox(0.41, 0.06, 0.28, 0.02), 0, 0.07, 0);                 // ベルト
     P('hips', 1, rbox(0.09, 0.11, 0.06, 0.02), 0.13, 0.0, 0.1);              // 腰のポーチ
-    P('hips', 4, rbox(0.11, 0.14, 0.05, 0.02), -0.17, -0.02, 0.02);          // ホルスター
+    P('hips',4,rbox(.075,.05,.025,.006),0,.075,.151); // duty belt buckle
+    for(const side of [-1,1]){P('hips',4,rbox(.055,.105,.05,.009),side*.15,.01,.13);P('hips',1,rbox(.08,.13,.07,.012),side*.205,-.015,-.045);}
+    P('hips',4,rbox(.08,.1,.045,.01),-.17,.015,-.14);          // ホルスター
     // 腹・胸
     P('spine', 0, rbox(0.36, 0.25, 0.25, 0.09), 0, 0.1, 0);
     P('chest', 0, rbox(0.48, 0.31, 0.28, 0.1), 0, 0.11, 0);
@@ -164,26 +169,34 @@
     P('chest', 1, rbox(0.39, 0.34, 0.07, 0.03), 0, 0.1, 0.145);              // 前面プレート
     P('chest', 1, rbox(0.39, 0.34, 0.06, 0.03), 0, 0.1, -0.15);              // 背面プレート
     P('chest', 1, rbox(0.49, 0.15, 0.31, 0.04), 0, -0.03, 0);                // 脇の帯
-    for (let i = 0; i < 3; i++) P('chest', 1, rbox(0.09, 0.14, 0.055, 0.015), -0.11 + i * 0.11, 0.0, 0.2); // 弾倉ポーチ
+    for(let i=0;i<4;i++){const px=-.1425+i*.095;P('chest',1,rbox(.083,.17,.07,.012),px,-.025,.202);P('chest',4,rbox(.066,.027,.009,.003),px,.048,.242);P('chest',1,rbox(.027,.115,.009,.003),px,-.035,.244);}
+    P('chest',9,rbox(.205,.055,.012,.003),0,.184,.188); // woven chest name strip
+    P('chest',9,rbox(.25,.064,.012,.003),0,.19,-.194);
+    P('chest',4,rbox(.055,.082,.033,.007),-.154,.155,.205); // body radio / PTT
+    P('chest',4,rbox(.011,.14,.011,.003),.161,.27,.191); // radio antenna
+    for(const x of [-.13,.13]){P('chest',4,rbox(.052,.042,.024,.005),x,.252,.166);P('chest',1,rbox(.045,.12,.019,.004),x,.19,.162);}
+    // Coiled microphone cable, following the upper chest.
+    for(let i=0;i<12;i++)P('chest',4,sphere(.009),-.162+i*.012,.225+Math.sin(i/11*Math.PI)*.03,.18); // 弾倉ポーチ
     P('chest', 4, rbox(0.07, 0.12, 0.05, 0.015), 0.14, 0.17, 0.19);          // 無線機
     P('chest', 1, rbox(0.065, 0.05, 0.34, 0.02), 0.13, 0.27, 0);             // 肩ベルト
     P('chest', 1, rbox(0.065, 0.05, 0.34, 0.02), -0.13, 0.27, 0);
-    P('chest', 1, rbox(0.27, 0.3, 0.11, 0.03), 0, 0.12, -0.225);             // 背中の装備
+    P('chest', 1, rbox(0.22, 0.13, 0.035, 0.015), 0, 0.04, -0.197);             // 背中の装備
     P('chest', 0, sphere(0.085, 1.1, 1, 1.1), 0.225, 0.19, 0);               // 肩（三角筋）
     P('chest', 0, sphere(0.085, 1.1, 1, 1.1), -0.225, 0.19, 0);
     // 首・頭
-    P('neck', 2, organic([[0.07, 0], [0.066, 0.5], [0.068, 1.0]], 0.12), 0, 0.1, 0.0, 0, 0, 0, true, 0.12);
-    P('head', 2, sphere(0.103, 0.92, 1.08, 1.0), 0, 0.1, 0.012);
-    P('head', 3, hemi(0.135), 0, 0.135, -0.005);
-    P('head', 3, rbox(0.25, 0.03, 0.27, 0.012), 0, 0.135, -0.005);          // ヘルメットのふち
-    P('head', 4, rbox(0.04, 0.09, 0.1, 0.02), 0.125, 0.1, 0);                // 耳当て（イヤーマフ）
-    P('head', 4, rbox(0.04, 0.09, 0.1, 0.02), -0.125, 0.1, 0);
-    // ゴーグル：目元を覆う枠（黒）と、反射する一枚レンズ、ヘルメットに回したバンド
-    P('head', 4, rbox(0.196, 0.074, 0.05, 0.022), 0, 0.118, 0.085);          // 枠
-    P('head', 5, rbox(0.178, 0.054, 0.014, 0.012), 0, 0.12, 0.112);          // レンズ
-    P('head', 4, rbox(0.03, 0.012, 0.03, 0.005), 0, 0.083, 0.11);            // 鼻当て
-    { const st = new THREE.TorusGeometry(0.127, 0.009, 6, 28); st.rotateX(Math.PI / 2); st.scale(1, 1, 1.08); P('head', 4, st, 0, 0.122, -0.008); }   // バンド
-    P('head', 4, rbox(0.06, 0.05, 0.04, 0.01), 0, 0.235, 0.105);             // 暗視装置マウント
+    P('neck',7,organic([[.067,0],[.063,.5],[.067,1]],.12),0,.1,0,0,0,0,true,.12);
+    P('head',7,sphere(.103,.92,1.12,1),0,.1,.008);
+    P('head',7,rbox(.128,.08,.11,.035),0,.025,.037); // jaw
+    P('head',8,hemi(.104),0,.13,-.005); // close-cropped hair, uncovered face
+    for(const side of [-1,1]){
+      P('head',7,sphere(.023,.5,1,.65),side*.096,.095,.005);
+      P('head',4,rbox(.034,.006,.008,.002),side*.038,.119,.104);
+      P('head',8,rbox(.039,.009,.009,.002),side*.037,.135,.101);
+    }
+    P('head',7,rbox(.025,.045,.032,.012),0,.091,.109);
+    P('head',8,rbox(.043,.004,.008,.001),0,.051,.106);
+    P('head',4,rbox(.016,.043,.02,.005),-.108,.095,.012); // discreet earpiece
+    P('head',4,rbox(.01,.012,.07,.004),-.102,.074,.048);
     // 腕：肩の丸み → 上腕二頭筋 → 肘 → 前腕の膨らみ → 手首
     for (const s of ['L', 'R']) {
       const sg = s === 'L' ? 1 : -1;
@@ -206,7 +219,13 @@
     for (const s of ['L', 'R']) {
       const sg = s === 'L' ? 1 : -1;
       P('th' + s, 0, organic([[0.11, 0], [0.108, 0.2], [0.095, 0.55], [0.075, 0.92], [0.072, 1.0]], L_TH, 0.003), 0, 0, 0, 0, 0, 0, true, L_TH);
-      P('th' + s, 1, rbox(0.08, 0.13, 0.055, 0.02), sg * 0.088, -0.2, 0.03);                // 太もものポーチ
+      P('th'+s,0,rbox(.065,.155,.09,.015),sg*.087,-.24,-.005); // cargo pocket
+      if(s==='R'){
+        P('th'+s,4,rbox(.068,.2,.095,.012),sg*.116,-.2,.025); // drop-leg holster
+        P('th'+s,4,rbox(.045,.065,.04,.008),sg*.119,-.077,.027,.22);
+        for(const y of [-.15,-.31])P('th'+s,4,organic([[.112,0],[.112,1]],.032),0,y,0);
+        P('th'+s,4,rbox(.035,.14,.025,.005),sg*.102,-.028,0);
+      }                // 太もものポーチ
       P('th' + s, 1, rbox(0.03, 0.03, 0.14, 0.01), sg * 0.06, -0.12, 0.0);                  // ベルト
       P('sn' + s, 0, organic([[0.071, 0], [0.079, 0.25], [0.065, 0.55], [0.053, 0.85], [0.056, 1.0]], L_SN, 0.003), 0, 0, 0, 0, 0, 0, true, L_SN);
       P('sn' + s, 4, rbox(0.13, 0.13, 0.06, 0.025), 0, -0.04, 0.072);                      // 膝パッド
@@ -216,7 +235,7 @@
     }
 
     // 結合
-    const byMat = [[], [], [], [], [], [], []];
+    const byMat = Array.from({length:10},()=>[]);
     for (const p of parts) byMat[p.mat].push(p);
     const pos = [], nor = [], uv = [], si = [], sw = [];
     const geo = new THREE.BufferGeometry();
@@ -259,6 +278,39 @@
     return geo;
   }
 
+  // ---------- ショットガンとハンドガン（敵用） ----------
+  let SG_GEO = null, PI_GEO = null;
+  function shotgunGeometry() {
+    if (SG_GEO) return SG_GEO;
+    const list = [];
+    const add = (g, x, y, z, rx) => { if (rx) g.rotateX(rx); g.translate(x, y, z); list.push(g.index ? g.toNonIndexed() : g); };
+    const cyl = (r, len) => { const g = new THREE.CylinderGeometry(r, r, len, 10); g.rotateX(Math.PI / 2); return g; };
+    add(rbox(0.046, 0.066, 0.2, 0.012), 0, 0, 0.04);          // 機関部
+    add(cyl(0.0115, 0.48), 0, 0.022, 0.38);                    // 銃身
+    add(cyl(0.013, 0.36), 0, -0.012, 0.34);                    // 弾倉の筒
+    add(rbox(0.054, 0.048, 0.16, 0.012), 0, -0.012, 0.3);      // 先台（ポンプ）
+    add(rbox(0.042, 0.066, 0.25, 0.012), 0, -0.012, -0.2, 0.1); // ストック
+    add(rbox(0.032, 0.105, 0.042, 0.01), 0, -0.07, -0.03, -0.3); // グリップ
+    SG_GEO = THREE.BufferGeometryUtils.mergeBufferGeometries(list);
+    return SG_GEO;
+  }
+  function pistolGeometry() {
+    if (PI_GEO) return PI_GEO;
+    const list = [];
+    const add = (g, x, y, z, rx) => { if (rx) g.rotateX(rx); g.translate(x, y, z); list.push(g.index ? g.toNonIndexed() : g); };
+    add(rbox(0.03, 0.031, 0.19, 0.006), 0, 0.03, 0.08);        // スライド
+    add(rbox(0.028, 0.02, 0.15, 0.005), 0, 0.008, 0.07);       // フレーム
+    add(rbox(0.031, 0.11, 0.046, 0.008), 0, -0.04, 0.005, -0.22); // グリップ
+    PI_GEO = THREE.BufferGeometryUtils.mergeBufferGeometries(list);
+    return PI_GEO;
+  }
+  // 敵の持つ銃の種類ごとの、手を添える位置・銃口の位置
+  const GUN_LAYOUT = {
+    rifle: { geo: () => gunGeometry(), pos: [0, 0, 0.12], gripR: [0, -0.06, 0], gripL: [0, -0.035, 0.28], mag: [0, -0.12, 0.13], muzzle: [0, 0.01, 0.66], flash: 0.45 },
+    shotgun: { geo: () => shotgunGeometry(), pos: [0, 0, 0.12], gripR: [0, -0.06, -0.02], gripL: [0, -0.04, 0.3], mag: [0, -0.04, 0.05], muzzle: [0, 0.022, 0.63], flash: 0.6 },
+    pistol: { geo: () => pistolGeometry(), pos: [0.03, 0.05, 0.3], gripR: [0, -0.05, 0.0], gripL: [-0.012, -0.06, 0.02], mag: [0, -0.1, 0.01], muzzle: [0, 0.03, 0.18], flash: 0.3 },
+  };
+
   // ---------- 小銃（敵用、1メッシュ） ----------
   function gunGeometry() {
     if (GUN_GEO) return GUN_GEO;
@@ -277,6 +329,30 @@
     GUN_GEO = THREE.BufferGeometryUtils.mergeBufferGeometries(list);
     GUN_MAT = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x1c1d1f).convertSRGBToLinear(), roughness: 0.45, metalness: 0.55 });
     return GUN_GEO;
+  }
+
+  // Small shared accessories follow the head bone, including during a ragdoll.
+  const HEAD_GEAR={}, RIGID_MATERIALS=new WeakMap();
+  function rigidMaterials(materials){let set=RIGID_MATERIALS.get(materials);if(!set){set=materials.map(m=>{const copy=m.clone();copy.skinning=false;return copy;});RIGID_MATERIALS.set(materials,set);}return set;}
+  function headGear(variant,M){
+    if(!variant||variant==='none')return null;
+    M=rigidMaterials(M);
+    if(!HEAD_GEAR.helmet){
+      const shell=hemi(.142);shell.scale(1,.94,1.04);shell.translate(0,.137,-.007);HEAD_GEAR.helmet=shell;
+      HEAD_GEAR.rim=rbox(.277,.022,.288,.008);HEAD_GEAR.lens=rbox(.076,.045,.014,.008);HEAD_GEAR.frame=rbox(.087,.055,.018,.009);
+      HEAD_GEAR.bridge=rbox(.032,.008,.015,.002);HEAD_GEAR.temple=rbox(.009,.012,.105,.003);HEAD_GEAR.strap=rbox(.014,.12,.014,.003);
+    }
+    const root=new THREE.Group();root.name='head-equipment';root.userData.variant=variant;
+    const add=(geo,mat,x,y,z)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=true;root.add(m);return m;};
+    if(variant.includes('helmet')){
+      add(HEAD_GEAR.helmet,M[3],0,0,0);add(HEAD_GEAR.rim,M[3],0,.135,-.007);
+      for(const side of [-1,1])add(HEAD_GEAR.strap,M[4],side*.094,.077,-.01).rotation.z=side*.13;
+    }
+    if(variant.includes('sunglasses')){
+      for(const side of [-1,1]){add(HEAD_GEAR.frame,M[4],side*.047,.115,.109);add(HEAD_GEAR.lens,M[5],side*.047,.115,.121);add(HEAD_GEAR.temple,M[4],side*.092,.127,.061);}
+      add(HEAD_GEAR.bridge,M[4],0,.12,.119);
+    }
+    return root;
   }
 
   // ---------- 2本の骨の腕を、手首が目標に届くように曲げる（解析的IK） ----------
@@ -312,7 +388,7 @@
 
   // ---------- 生成 ----------
   G.Humanoid = {
-    TEAM_COLORS,
+    TEAM_COLORS, rigidMaterials,
     create(opts) {
       opts = opts || {};
       const M = matsFor(opts.style || 'enemy', opts.team || 'red');
@@ -333,6 +409,7 @@
       const fall = new THREE.Group();          // 倒れるときの回転軸（足元）
       fall.add(mesh);
       const root = new THREE.Group(); root.add(fall);
+      const gear=headGear(opts.gear,M);if(gear)bones.head.add(gear);
 
       // 小銃：胸の骨の子として右肩側に持つ
       const gunPivot = new THREE.Object3D(); gunPivot.position.set(-0.09, 0.12, 0.1); bones.chest.add(gunPivot);
@@ -346,7 +423,7 @@
       flash.scale.set(0.45, 0.45, 1); flash.visible = false; muzzle.add(flash);
 
       const h = {
-        root, fall, mesh, bones, gun, gunPivot, gripR, gripL, magPt, muzzle, flash,
+        gear, cutGeometry:G.SeverGeometry.prepare(geo,list), root, fall, mesh, bones, gun, gunPivot, gripR, gripL, magPt, muzzle, flash,
         headWorld: V3(0, 1.66, 0), hipsWorld: V3(0, 0.98, 0),
         // アニメーションの内部状態（すべてなめらかに追従させる）
         st: {
@@ -358,8 +435,18 @@
         fire() { this.st.kickV -= 9; },
         hit(dirLocalX, dirLocalZ, strong) { const k = strong ? 7 : 4.5; this.st.hitXV += dirLocalZ * k; this.st.hitZV -= dirLocalX * k; },
         // axis: 'x'（前後）/ 'z'（左右）, sign: 倒れる向き
-        die(axis, sign) { this.st.dead = true; this.st.deathT = 0; this.st.fallAxis = axis; this.st.fallSign = sign; },
-        update, dispose() { },
+        // 持つ銃を替える（'rifle' | 'shotgun' | 'pistol'）
+        setWeapon(kind) {
+          const L = GUN_LAYOUT[kind] || GUN_LAYOUT.rifle;
+          this.weapon = kind;
+          this.gun.geometry = L.geo();
+          this.gun.position.set(...L.pos);
+          this.gripR.position.set(...L.gripR); this.gripL.position.set(...L.gripL);
+          this.magPt.position.set(...L.mag); this.muzzle.position.set(...L.muzzle);
+          this.flash.scale.set(L.flash, L.flash, 1);
+        },
+        die(axis, sign, instant) { this.st.instantDeath = !!instant; this.st.dead = true; this.st.deathT = 0; this.st.fallAxis = axis; this.st.fallSign = sign; },
+        update, dispose() { if (G.Physics) G.Physics.removeRagdoll(this); },
       };
       return h;
     },
@@ -370,6 +457,16 @@
   const GROUND_PTS = [['head', 0.13], ['neck', 0.09], ['chest', 0.16], ['spine', 0.15], ['hips', 0.14], ['hdL', 0.05], ['hdR', 0.05], ['faL', 0.06], ['faR', 0.06], ['snL', 0.07], ['snR', 0.07], ['ftL', 0.06], ['ftR', 0.06]];
   function update(s) {
     const h = this, st = h.st, B = h.bones, dt = s.dt;
+    if (st.dead && G.Physics?.world) {
+      if (!h.ragdoll) G.Physics.ragdoll(h);
+      if (st.sever) { G.Physics.sever(h, st.sever); st.sever = null; }
+      if (!st.gunDropped && h.ragdoll.time > 0.12 && s.scene) {   // 力が抜けてすぐに銃が手から落ちる
+        st.gunDropped = true; h.gun.getWorldPosition(_v); h.gun.getWorldQuaternion(_q);
+        s.scene.add(h.gun); h.gun.position.copy(_v); h.gun.quaternion.copy(_q);
+        st.gunVel.set(.2,.15,.2); st.gunSpin.set(1,2,1);
+      }
+      G.Physics.syncRagdoll(h); updateGun(h,st,dt,s); return;
+    }
     // 倒れて落ち着いた後は、何もしない（脚が動き続けないように）
     if (st.dead && st.settled) { updateGun(h, st, dt, s); return; }
     // ---- 目標値へなめらかに追従 ----
@@ -390,7 +487,7 @@
 
     // ---- 脚 ----
     const runK = clamp((st.speed - 2.2) / 2, 0, 1), moveK = clamp(st.speed / 1.4, 0, 1) * (1 - st.prone);
-    const stride = 1.25 + runK * 0.6;
+    const stride = (G.strideFor ? G.strideFor(Math.max(.5,st.speed),false) * 2 : 1.25) * (1 - st.crouch * 0.18);
     let dph = (st.speed / stride) * Math.PI * 2 * dt * (1 - st.crouch * 0.25);
     // 足を引きずる：痛む脚に体重が乗る間は周期を速め（すぐ逃がす）、歩幅も狭くする
     if (st.limp > 0.01) { const onBad = Math.sin(st.phase + (st.limpSide > 0 ? 0 : Math.PI)) > 0; dph *= onBad ? 1 + st.limp * 0.8 : 1 - st.limp * 0.35; }
@@ -400,9 +497,9 @@
     for (const [sd, off] of [['L', 0], ['R', Math.PI]]) {
       const ph = st.phase + off;
       const bad = st.limp > 0.01 && ((sd === 'L') === (st.limpSide > 0));
-      const swingA = (0.42 + runK * 0.3) * (bad ? 1 - st.limp * 0.55 : 1);
+      const swingA = (0.42 + runK * 0.3) * (1 - st.crouch * 0.42) * (bad ? 1 - st.limp * 0.55 : 1);
       const swing = Math.sin(ph) * swingA * moveK;
-      const lift = Math.max(0, Math.cos(ph)) * (0.75 + runK * 0.7) * moveK * (bad ? 1 - st.limp * 0.6 : 1);
+      const lift = Math.max(0, Math.cos(ph)) * (0.55 + runK * 0.7) * moveK * (bad ? 1 - st.limp * 0.6 : 1);
       // 伏せ：脚をまっすぐ伸ばし、少し開く
       const th = (-swing - c * 1.35 - runK * 0.12) * (1 - st.prone) + st.prone * 0.05;
       const kn = (0.06 + lift + c * 2.3) * (1 - st.prone) + st.prone * 0.1;
@@ -412,10 +509,10 @@
       const ext = L_TH * Math.cos(th) + L_SN * Math.cos(th + kn);
       if (ext > maxExt) maxExt = ext;
     }
-    const hipsY = 0.04 + maxExt + FOOT_H;
+    const hipsY = 0.04 + maxExt + FOOT_H - Math.abs(Math.sin(st.phase)) * 0.018 * moveK;
     // リーン：腰を反対側へ少しずらし、背骨と胸を傾けて頭を壁の外へ出す
     const lean = st.lean * (1 - st.prone);
-    B.hips.position.set(Math.sin(st.breath * 0.45) * 0.01 * (1 - moveK) + lean * 0.06, hipsY * (1 - st.prone), 0);
+    B.hips.position.set(Math.sin(st.phase) * 0.018 * moveK * (1 + c * 0.5) + Math.sin(st.breath * 0.45) * 0.01 * (1 - moveK) + lean * 0.06, hipsY * (1 - st.prone), 0);
     B.hips.rotation.set(c * 0.25, Math.sin(st.phase) * 0.1 * moveK, Math.sin(st.phase) * 0.035 * moveK + (st.limp > 0.01 ? Math.sin(st.phase) * 0.07 * st.limp : 0) + lean * 0.12);
 
     // ---- 上半身 ----
@@ -534,7 +631,14 @@
   ];
   const _A = new THREE.Vector3(), _B = new THREE.Vector3(), _P = new THREE.Vector3();
   // 光線とカプセル（線分＋半径）の交差：線分を細かく分けた球で近似
-  G.Humanoid.rayParts = function (h, o, d, maxT) {
+  // 腕への命中が、肘より先（前腕・手）か、肘より肩側（上腕）か
+  G.Humanoid.isForearmHit = function (h, p, side) {
+    const s = side >= 0 ? 'L' : 'R', S = new THREE.Vector3(), E = new THREE.Vector3(), Hd = new THREE.Vector3();
+    h.bones['ua' + s].getWorldPosition(S); h.bones['fa' + s].getWorldPosition(E); h.bones['hd' + s].getWorldPosition(Hd);
+    const segDist = (a, b) => { const ab = b.clone().sub(a), t = Math.max(0, Math.min(1, p.clone().sub(a).dot(ab) / Math.max(1e-6, ab.lengthSq()))); return a.clone().addScaledVector(ab, t).distanceTo(p); };
+    return segDist(E, Hd) < segDist(S, E);
+  };
+  G.Humanoid.rayParts = function (h, o, d, maxT, knife = false) {
     let best = null;
     const sph = (cx, cy, cz, r, part) => {
       const ox = o.x - cx, oy = o.y - cy, oz = o.z - cz;
@@ -544,10 +648,16 @@
       if (t > 0 && t < maxT && (!best || t < best.t)) best = { t, part, side: curSide };
     };
     let curSide = 0;
-    sph(h.headWorld.x, h.headWorld.y, h.headWorld.z, 0.13, 'head');
+    const miss = h.missing;   // 欠損した部位には当たらない
+    if (!miss || !miss.has('head')) sph(h.headWorld.x, h.headWorld.y, h.headWorld.z, 0.13, 'head');
+    if (knife && !miss?.has('head')) {
+      h.bones.neck.localToWorld(_A.set(0, .035, 0));
+      sph(_A.x, _A.y, _A.z, .085, 'neck');
+    }
     for (const [a, b, r, part] of SEGS) {
+      if (miss && (miss.has(a) || miss.has(b))) continue;
       curSide = a.endsWith('L') ? 1 : a.endsWith('R') ? -1 : 0;
-      h.bones[a].getWorldPosition(_A); h.bones[b].getWorldPosition(_B);
+      h.bones[knife && a === 'neck' ? 'chest' : a].getWorldPosition(_A); h.bones[b].getWorldPosition(_B);
       const n = Math.max(2, Math.ceil(_A.distanceTo(_B) / (r * 0.9)));
       for (let i = 0; i <= n; i++) { _P.lerpVectors(_A, _B, i / n); sph(_P.x, _P.y, _P.z, r, part); }
     }

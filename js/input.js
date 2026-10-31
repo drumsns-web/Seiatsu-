@@ -7,6 +7,8 @@ G.ACTIONS = [
   { id: 'back',      label: '後退',                     def: 'KeyS' },
   { id: 'left',      label: '左移動',                   def: 'KeyA' },
   { id: 'right',     label: '右移動',                   def: 'KeyD' },
+  { id: 'jump', label: 'ジャンプ', def: 'Space' },
+  { id: 'treat',     label: '応急処置（出血を止める。もう一度押すと中断）', def: 'KeyH' },
   { id: 'reload',    label: 'リロード',                 def: 'KeyR' },
   { id: 'leanL',     label: '左リーン（押すたび切替）', def: 'KeyQ' },
   { id: 'leanR',     label: '右リーン（押すたび切替）', def: 'KeyE' },
@@ -14,15 +16,16 @@ G.ACTIONS = [
   { id: 'prone',     label: '匍匐（切替）',             def: 'ControlLeft' },
   { id: 'sprint',    label: 'ダッシュ（押している間）', def: 'ShiftLeft' },
   { id: 'knife',     label: '近接ナイフ',               def: 'KeyV' },
-  { id: 'zoomIn',    label: '倍率を上げる（照準中）／歩く速さを上げる', def: 'KeyX' },
-  { id: 'zoomOut',   label: '倍率を下げる（照準中）／歩く速さを下げる', def: 'KeyZ' },
-  { id: 'walk',      label: 'ゆっくり歩く（押している間・足音が小さい）', def: 'AltLeft' },
+  { id: 'zoomIn',    label: '倍率を上げる（照準中）', def: 'Equal' },
+  { id: 'zoomOut',   label: '倍率を下げる（照準中）', def: 'Minus' },
+  { id: 'walk',      label: '忍び歩き（押している間・ほぼ無音）', def: 'KeyX' },
   { id: 'grenade',   label: '手りゅう弾（長押しで構え、離して投げる。マウス中央クリックでも可）', def: 'KeyG' },
   { id: 'suppressor', label: 'サプレッサーの取り付け・取り外し', def: 'KeyT' },
   { id: 'w1',        label: 'アサルトライフルに持ち替え', def: 'Digit1' },
   { id: 'w2',        label: 'ハンドガンに持ち替え',     def: 'Digit2' },
   { id: 'w3',        label: 'ショットガンに持ち替え',   def: 'Digit3' },
-  { id: 'interact',  label: '調べる・ドア（予約／未使用）', def: 'KeyF' },
+  { id: 'command',   label: '仲間に指示（ついてこい／その場で待て）', def: 'KeyF' },
+  { id: 'moveOrder', label: '照準位置へアルファとブラボーを移動', def: 'KeyZ' },
   { id: 'debug',     label: 'AI状態の表示（開発用）',   def: 'F3' },
 ];
 
@@ -74,6 +77,7 @@ G.Input = {
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.clear(); });
     window.addEventListener('mousedown', (e) => {
       if (!this.enabled) return;
+      if (e.sourceCapabilities?.firesTouchEvents || e.target.closest?.('#touch-controls')) return;
       const b = e.button;
       if (b === 1) { this.mouse.mmb = true; e.preventDefault(); return; }   // 中央クリック（手りゅう弾）。自動スクロールは止める
       if (b !== 0 && b !== 2) return;
@@ -105,10 +109,11 @@ G.Input = {
       // ブラウザーのマウス固定中に、まれに実際の数倍〜数十倍の移動量が1回だけ届くことがある（視点が急に変な方向を向く原因）。
       // 直前までの動きの大きさ（なめらかな平均）と比べ、急に桁違いに大きい値が来たら捨てる。
       // 普通に素早く振り向く操作は、数回のうちに少しずつ大きくなるので捨てない。
+      if (!Number.isFinite(mx) || !Number.isFinite(my)) return;
       const m = Math.max(Math.abs(mx), Math.abs(my));
       const avg = this._mAvg || 0;
       const limit = Math.max(120, avg * 6 + 60);
-      if (m > limit) { this._spikes = (this._spikes || 0) + 1; this._mAvg = avg * 0.7 + Math.min(m, limit) * 0.3; return; }
+      if (m > limit) { this._spikes = (this._spikes || 0) + 1; return; }
       this._mAvg = avg * 0.7 + m * 0.3;
       this.mouse.dx += mx;
       this.mouse.dy += my;
@@ -125,6 +130,7 @@ G.Input = {
     if (!this.enabled) return;
     if (e.code === 'Escape') { // 中断用に確保。全画面のキーボードロック中でも確実に一時停止する
       if (document.pointerLockElement) document.exitPointerLock();
+      else if (G.Game) G.Game.pause();
       return;
     }
     // ゲーム中はブラウザーの既定動作（F3検索、Ctrl+各種など）を可能な範囲で止める
@@ -161,6 +167,13 @@ G.Input = {
     for (const a of G.ACTIONS) {
       this.binds[a.id] = (saved && typeof saved[a.id] === 'string' && saved[a.id] !== 'Escape') ? saved[a.id] : a.def;
     }
+    if (!G.Storage.get('cq_input_v2')) {
+      const oldWalk = this.binds.walk;
+      for (const a of G.ACTIONS) if (a.id !== 'walk' && this.binds[a.id] === 'KeyX') this.binds[a.id] = a.id === 'zoomIn' ? 'Equal' : oldWalk;
+      this.binds.walk = 'KeyX';
+      if (this.binds.zoomOut === 'KeyZ') this.binds.zoomOut = 'Minus';
+      this.saveBinds(); G.Storage.set('cq_input_v2', true);
+    }
   },
   saveBinds() { return G.Storage.set('cq_keybinds_v1', this.binds); },
   resetBinds() {
@@ -168,7 +181,7 @@ G.Input = {
     return this.saveBinds();
   },
 
-  isDown(actionId) { return this.down.has(this.binds[actionId]); },
+  isDown(actionId) { return this.down.has(this.binds[actionId]) || !!G.Touch?.isDown(actionId); },
   takeEdges() { const e = this.edges; this.edges = []; return e; },
   takeMouse() {
     const m = { dx: this.mouse.dx, dy: this.mouse.dy, wheel: this.mouse.wheel };
@@ -176,6 +189,8 @@ G.Input = {
     return m;
   },
   clear() {
+    if (G.Touch) G.Touch.clear();
+    this._mAvg = 0;
     this.down.clear(); this.edges = []; this.btnDown = [false, false, false];
     this.mouse.lmb = false; this.mouse.rmb = false; this.mouse.mmb = false;
     this.mouse.dx = 0; this.mouse.dy = 0; this.mouse.wheel = 0;

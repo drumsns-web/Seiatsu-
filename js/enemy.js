@@ -81,6 +81,8 @@
 
   // ---------------- 遮蔽点（高さ1m以上の障害物に接する床セル） ----------------
   let coverCells = null;
+  G.coverInvalidate = () => { coverCells = null; };
+  G.getCoverCells = () => getCoverCells();
   function getCoverCells() {
     if (coverCells) return coverCells;
     coverCells = [];
@@ -97,8 +99,17 @@
   // ---------------- 敵 ----------------
   const STATE_JA = { evade: '手りゅう弾から退避', prone: '伏せ', patrol: '巡回', guard: '警戒', suspicious: '不審', investigate: '調査', combat: '交戦', cover: '遮蔽', flank: '迂回', chase: '追跡', hold: '待ち伏せ', search: '捜索', dead: '撃破' };
   const ROLE_JA = { anchor: '守備役', rifleman: '小銃手', flanker: '迂回役', rusher: '突撃役' };
-  const MAX_PUSHERS = 3;           // 同時に詰めてくる人数の上限（全員が一斉に突っ込まない）
+  const MAX_PUSHERS = 2;           // 同時に詰めてくる人数の上限（全員が一斉に突っ込まない）
   const RADIO_RANGE = 26;          // 無線で位置を共有する距離
+
+  // 敵の武器：突撃役はショットガン、それ以外はライフル。ハンドガンは主力武器が使えないときだけ
+  const EWEAPON = {
+    rifle: { mag: 25, reserve: 75, reload: 2.4, name: 'ライフル' },
+    shotgun: { mag: 6, reserve: 18, reload: 3.2, name: 'ショットガン' },
+    pistol: { mag: 12, reserve: 24, reload: 1.6, name: 'ハンドガン' },
+  };
+  G.EWEAPON = EWEAPON;
+  const LEG_HITS_TO_DOWN = 3;   // 脚にこれだけ当たると立てなくなる
 
   class Enemy {
     constructor(id, spawn, role, scene) {
@@ -111,7 +122,10 @@
       this.patrolIdx = 0; this.waitT = rnd(0, 2);
       this.yaw = rnd(0, Math.PI * 2); this.lookYaw = this.yaw; this.bodyYaw = this.yaw; this.lookPitch = 0;
       this.watch = this.makeWatchAngles(); this.watchIdx = 0; this.watchT = rnd(1, 3);
-      this.hp = 100; this.magSize = 25; this.ammo = 25; this.reloadT = 0; this.reloadDur = 2.4;
+      this.hp = 100; this.reloadT = 0; this.switchT = 0;
+      this.primary = role === 'rusher' ? 'shotgun' : 'rifle';
+      this.arms = { [this.primary]: { ammo: EWEAPON[this.primary].mag, reserve: EWEAPON[this.primary].reserve }, pistol: { ammo: EWEAPON.pistol.mag, reserve: EWEAPON.pistol.reserve } };
+      this.weapon = this.primary; this.magSize = EWEAPON[this.primary].mag; this.ammo = this.magSize; this.reloadDur = EWEAPON[this.primary].reload;
       this.state = role === 'anchor' ? 'guard' : 'patrol'; this.stateT = 0;
       this.awareness = 0; this.alertT = 0;
       this.visible = false; this.reaction = 0;
@@ -129,16 +143,19 @@
       this.holdT = 0; this.pushT = 0; this.strafe = 0; this.strafeT = 0; this.hurtTime = -99;
       this.radioT = 0; this.lastReportSent = -99;
       this.wounds = { leg: 0, stomach: 0, arm: 0 }; this.limpSide = 1; this.moanT = rnd(4, 8);
+      this.legless = null; this.downed = false; this.bleed = 0;
+      this.knifeBleed = 0; this.neckWound = false; this.knifeDripT = 0;
       this.prone = false; this.proneT = 0; this.standUpT = 0; this.lean = 0; this.dodgeT = 0;
       this.voicePitch = rnd(0.85, 1.15);
       this.percT = Math.random() * 0.1;
       this.stepDist = 0; this.speed = 0; this.deadT = 0;
-      this.body = G.Humanoid.create(); scene.add(this.body.root);
+      this.body = G.Humanoid.create({gear:['none','helmet','sunglasses','helmet-sunglasses'][id%4]}); scene.add(this.body.root);
       // 倒れたときの音（膝をつく・体が床に当たる・銃が落ちる）
       this.body.onSound = (kind, p) => {
         const at = p ? p.clone() : this.body.hipsWorld.clone();
         if (kind === 'knee') G.Audio.kneeDrop(at); else if (kind === 'fall') G.Audio.bodyFall(at); else if (kind === 'gun') G.Audio.gunClatter(at);
       };
+      this.body.setWeapon(this.primary);
       this.model = { root: this.body.root, flash: this.body.flash, muzzle: this.body.muzzle };
       this.flashT = 0;
       this.debug = { line: null, seen: null, heard: null };
@@ -148,6 +165,15 @@
     get pushing() { return !this.dead && (this.state === 'chase' || this.state === 'flank' || (this.state === 'investigate' && this.goalKind === 'report')); }
     eyeY() { return this.body.headWorld.y; }
     eyePos() { const h = this.body.headWorld; return V3(h.x, h.y, h.z); }
+    voicePos() {
+      if (this.body.missing?.has('head')) return null;
+      this.body.root.updateMatrixWorld(true);
+      return this.body.bones.head.localToWorld(V3(0, 0.1, 0.01));
+    }
+    say(type, vol = 1) {
+      const at = this.voicePos();
+      if (at) G.Audio.voice(at, type, this.voicePitch, vol, this.id, () => this.voicePos());
+    }
     // 傷の影響：脚は大きく遅く、腹は前かがみで遅く、瀕死はさらに遅い。腕は狙いだけ鈍る
     mobility() { return (this.wounds.leg ? 0.5 : 1) * (this.wounds.stomach ? 0.72 : 1) * (this.hp < 35 ? 0.75 : 1); }
     get critical() { return this.hp < 35; }
@@ -207,19 +233,56 @@
       if (!this.visible) this.suspectPos = fromPos.clone();
       this.awareness = Math.max(this.awareness, 0.75);
       if (this.hp <= 0) { this.die(lz, lx, part); return true; }
+      if (this.neckWound) return false;
+      // 脚に何発も当たると、立てなくなる（這うことしかできない）
+      if (!this.downed && this.wounds.leg >= LEG_HITS_TO_DOWN) this.goDown();
       // 痛みの声と、とっさの回避（横へ跳ぶ／しゃがむ）
       // 脚・腹は苦痛の声。体力が少ないほど長く苦しそうに。腕や軽い傷は短いうめき
       const heavy = part === 'legs' || part === 'stomach' || this.hp < 50;
-      G.Audio.voice(this.eyePos(), heavy ? (this.hp < 55 ? 'agony' : 'pain') : 'hurt', this.voicePitch);
-      if (!this.prone && this.wounds.leg < 2) { this.dodgeT = 0.35; this.strafe = Math.random() < 0.5 ? -1 : 1; if (Math.random() < 0.5) this.wantCrouch = true; }
+      this.say(heavy ? (this.hp < 55 ? 'agony' : 'pain') : 'hurt');
+      if (!this.prone && !this.downed && this.wounds.leg < 2) { this.dodgeT = 0.35; this.strafe = Math.random() < 0.5 ? -1 : 1; if (Math.random() < 0.5) this.wantCrouch = true; }
       // 見えない所から撃たれた：すぐに遮蔽物へ（守備役はその場でしゃがむ）
       if (!this.visible && this.state !== 'cover') {
         if (!this.takeCover(fromPos, true)) { this.setState('investigate'); this.goalTo(fromPos, 'investigate', fromPos); }
       }
       return false;
     }
+    stab(part, from, side) {
+      if (this.dead) return false;
+      if (part === 'neck') {
+        if (!this.neckWound) {
+          this.neckWound = true; this.knifeBleed = this.hp / 5.5;
+          this.setState('incapacitated'); this.releaseCover(); this.path = null; this.goal = null;
+          this.speed = 0; this.reloadT = 0; this.switchT = 0;
+          this.prone = false; this.lean = 0; this.body.flash.visible = false; this.flashT = 0;
+          this.say('pain', .8);
+        }
+        return false;
+      }
+      const killed = this.damage(({arms:20,legs:24,body:32,stomach:35,head:30})[part] || 25, part, from, side);
+      if (!killed && !this.neckWound) {
+        this.knifeBleed = Math.min(3, this.knifeBleed + (part === 'body' || part === 'stomach' ? .8 : .55));
+        this.knifeWoundBone = part === 'arms' ? 'fa' + (side >= 0 ? 'L' : 'R') : part === 'legs' ? 'th' + (side >= 0 ? 'L' : 'R') : part === 'head' ? 'head' : 'spine';
+      }
+      return killed;
+    }
+    updateKnifeWound(dt) {
+      if (!(this.knifeBleed > 0)) return;
+      this.hp = Math.max(0, this.hp - this.knifeBleed * dt);
+      this.knifeDripT -= dt;
+      if (this.knifeDripT <= 0) {
+        this.knifeDripT = this.neckWound ? .42 : 1.1;
+        const p = V3(); this.body.bones[this.neckWound ? 'neck' : (this.knifeWoundBone || 'hips')].getWorldPosition(p);
+        if (G.Game.gore !== 'off') {
+          if (this.neckWound) G.Effects.neckBleed(p, this.bodyYaw);
+          else { const h = W().raycast(p.x, p.y, p.z, 0, -1, 0, 3); if (h) G.Effects.bloodDecal(h, .08); }
+        }
+      }
+      if (this.hp <= 0) { this.die(0, 0, 'bleed'); G.Player.kills++; }
+    }
     // 倒れる：撃たれた方向の反対へ。壁があれば空いている方向へ倒れる
     die(lz, lx, part) {
+      if (this.dead) return;
       this.state = 'dead'; this.hp = 0; this.deadT = 0; this.releaseCover(); this.prone = false;
       this.body.flash.visible = false;
       const yaw = this.bodyYaw, fwd = [Math.sin(yaw), Math.cos(yaw)], right = [-Math.cos(yaw), Math.sin(yaw)];
@@ -236,8 +299,8 @@
         if (d >= 1.85) { pick = c; bestD = d; break; }
         if (d > bestD) { bestD = d; pick = c; }
       }
-      this.body.die(pick[0], pick[1]);
-      if (part !== 'head') G.Audio.voice(this.eyePos(), 'death', this.voicePitch);
+      this.body.die(pick[0], pick[1], part === 'head');
+      G.Audio.deathVoice(this.voicePos(), this.voicePitch, this.id, () => this.voicePos(), part === 'head' ? 'head' : this.neckWound ? 'neck' : part);
       G.Enemies.onDeath(this);
     }
 
@@ -253,7 +316,8 @@
       this.alertT = Math.max(this.alertT, kind === 'gunshot' ? 30 : 12);
       // 交戦中に相手の装填音を聞いた → 好機なので詰める
       if (kind === 'reload' && isPlayer && (this.state === 'combat' || this.state === 'hold' || this.state === 'cover') && !this.visible && this.role !== 'anchor') {
-        this.pushT = 3.5; this.releaseCover(); this.setState('chase'); this.goalTo(this.heardPos, 'chase', this.heardPos); return;
+        if (G.Enemies.pushers() >= MAX_PUSHERS) return;
+        this.pushT = 2.5; this.releaseCover(); this.setState('chase'); this.goalTo(this.spreadPoint(this.heardPos), 'chase', this.heardPos); return;
       }
       if (this.role === 'anchor') { this.lookTarget = this.heardPos.clone(); if (this.state === 'patrol' || this.state === 'search') this.setState('guard'); return; }
       if (this.state === 'patrol' || this.state === 'suspicious' || this.state === 'search' || this.state === 'guard') {
@@ -299,7 +363,7 @@
       this.setState('evade'); this.evadeT = g.fuse + 0.6; this.evadeFrom = g.p.clone();
       if (best) this.goalTo(best, 'evade');
       this.alertT = Math.max(this.alertT, 30);
-      if (Math.random() < 0.6) G.Audio.voice(this.eyePos(), 'hurt', this.voicePitch, 0.7);   // とっさに声を上げる
+      if (Math.random() < 0.6) this.say('hurt', 0.7);   // とっさに声を上げる
     }
     // ---- 見る ----
     perceive(player, dt) {
@@ -345,6 +409,30 @@
       } else if (vis && this.awareness > 0.35 && (this.state === 'patrol' || this.state === 'search' || this.state === 'investigate' || this.state === 'guard')) {
         this.setState('suspicious');
       }
+    }
+
+    // 狙う相手を選ぶ：今の相手が見えていれば続け、見えなくなったら視界に入っている一番近い相手（プレイヤーか仲間）
+    pickTarget(player) {
+      const allies = G.Allies ? G.Allies.alive() : [];
+      if (!allies.length) return player;
+      if (this.tgtT > 0) { this.tgtT -= 0.016; if (this.tgt && !this.tgt.dead) return this.tgt; }
+      this.tgtT = 0.25;
+      const eye = this.eyePos();
+      const range = (this.state === 'combat' ? 55 : 40) * (W().outdoor ? 1.5 : 1);
+      const fov = (this.state === 'combat' || this.alertT > 0) ? 1.35 : 1.05;
+      if (this.tgt && !this.tgt.dead && this.visible) return this.tgt;
+      let best = null, bd = Infinity;
+      for (const c of [player, ...allies]) {
+        if (c.dead) continue;
+        const pts = c.visPoints(), d = eye.distanceTo(pts[0]);
+        if (d > range || d > bd) continue;
+        const off = Math.abs(angDiff(this.lookYaw, Math.atan2(pts[0].x - eye.x, pts[0].z - eye.z)));
+        if (off > fov && d > 1.8) continue;
+        if (!pts.some(p => W().lineOfSight(eye.x, eye.y, eye.z, p.x, p.y, p.z))) continue;
+        best = c; bd = d;
+      }
+      this.tgt = best || (this.tgt && !this.tgt.dead ? this.tgt : player);
+      return this.tgt;
     }
 
     // 最も新しい手掛かり（見た位置は、その時の移動方向へ少し先読みする）
@@ -402,9 +490,9 @@
       return 'moving';
     }
     moveDir(nx, nz, speed, dt, keepFacing) {
-      if (this.prone) { this.prone = false; this.standUpT = 0.7; }
+      if (this.prone && !this.downed) { this.prone = false; this.standUpT = 0.7; }   // 立てない敵は伏せたまま這う
       if (this.standUpT > 0) return;
-      speed *= this.mobility();
+      speed *= this.downed ? 1 : this.mobility();
       if (this.nudge && this.nudge.t > 0) { this.nudge.t -= dt; nx += this.nudge.x * 1.2; nz += this.nudge.z * 1.2; }
       for (const o of G.Enemies.list) {
         if (o === this || o.dead) continue;
@@ -449,9 +537,17 @@
         }
         return true;
       };
+      // 候補を「最良でもこの点数」の順に並べ、今の最良より良くなり得ない候補は見通しの計算をしない
+      const cands = [];
       for (const c of getCoverCells()) {
         const dMe = c.distanceTo(this.pos); if (dMe > maxDist) continue;
         const dT = c.distanceTo(threat); if (dT < 4) continue;
+        const toward = (this.pos.distanceTo(threat) - dT) * 0.6;
+        cands.push({ c, dMe, dT, lb: dMe + toward + Math.abs(dT - 10) * 0.25 - 0.5 });
+      }
+      cands.sort((a, b) => a.lb - b.lb);
+      for (const { c, dMe, dT, lb } of cands) {
+        if (lb >= bestScore) break;
         const key = Math.floor(c.x) + ',' + Math.floor(c.z);
         if (G.Enemies.reserved.has(key)) continue;
         if (!hiddenAt(c.x, c.z)) continue;
@@ -502,10 +598,17 @@
 
     // ---- 射撃 ----
     tryFire(player, dt) {
-      if (this.reloadT > 0) return;
+      if (this.dead || this.neckWound) return;
+      if (this.reloadT > 0 || this.switchT > 0) return;
       this.fireCD -= dt;
       if (this.fireCD > 0) return;
-      if (this.ammo <= 0) { if (this.retreatCD > 0 || this.state !== 'combat') this.startReload(); return; }
+      if (this.ammo <= 0) {
+        // 主力武器の弾が尽きた、または相手が目の前で込め直す余裕がない → ハンドガンを抜く
+        const close = this.visible && this.pos.distanceTo(player.pos) < 8;
+        if (this.weapon === this.primary && (this.arms[this.primary].reserve <= 0 || close) && (this.arms.pistol.ammo > 0 || this.arms.pistol.reserve > 0)) { this.drawPistol(); return; }
+        if (this.retreatCD > 0 || this.state !== 'combat' || this.downed || this.weapon === 'pistol') this.startReload();
+        return;
+      }
       const eye = this.eyePos(); eye.y -= 0.06;
       let aim = null;
       for (const tp of player.visPoints()) if (W().lineOfSight(eye.x, eye.y, eye.z, tp.x, tp.y, tp.z)) { aim = tp; break; }
@@ -517,18 +620,26 @@
         const v = V3(o.pos.x, 1.2, o.pos.z).sub(eye), t = v.dot(seg);
         if (t > 0 && t < segL && v.clone().addScaledVector(seg, -t).length() < 0.5) { this.fireCD = 0.3; this.strafe = Math.random() < 0.5 ? -1 : 1; this.strafeT = 0.8; return; }
       }
-      this.ammo--; this.burst--;
-      this.fireCD = this.burst > 0 ? 0.105 : rnd(0.35, 0.75);
-      if (this.burst <= 0) this.burst = 3 + (Math.random() * 4 | 0);
+      const wpn = this.weapon;
+      this.ammo--;
+      if (wpn === 'rifle') {
+        this.burst--;
+        this.fireCD = this.burst > 0 ? 0.105 : rnd(0.35, 0.75);
+        if (this.burst <= 0) this.burst = 3 + (Math.random() * 4 | 0);
+      } else if (wpn === 'shotgun') this.fireCD = rnd(0.9, 1.2);     // ポンプ操作の間
+      else this.fireCD = rnd(0.32, 0.6);
       this.shotsAtTarget++;
       const muzzleW = new THREE.Vector3(); this.body.muzzle.getWorldPosition(muzzleW);
       this.flashT = 0.05; this.body.flash.visible = true; this.body.flash.material.rotation = Math.random() * 6;
       this.body.fire();
-      G.Audio.gunshot(muzzleW, false);
+      G.Audio.gunshot(muzzleW, false, wpn === 'rifle' ? undefined : wpn);
+      const right = V3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      const forward = V3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      G.Effects.ejectCasing(muzzleW.clone().addScaledVector(forward, -.3), right, wpn, wpn === 'shotgun' ? .23 : 0, forward);
       G.Effects.enemyFlash(muzzleW);
       G.Enemies.broadcast(this.pos.clone().setY(1.4), 40, 'gunshot', false, this);
       const dist = eye.distanceTo(aim);
-      let p = 0.72 - dist * 0.011;
+      let p = wpn === 'shotgun' ? 0.95 - dist * 0.055 : wpn === 'pistol' ? 0.62 - dist * 0.018 : 0.72 - dist * 0.011;
       p *= player.posture === 'prone' ? 0.55 : player.posture === 'crouch' ? 0.8 : 1;
       p *= player.sprinting ? 0.55 : player.moving ? 0.8 : 1;
       p *= this.speed > 0.5 ? 0.7 : 1;
@@ -536,11 +647,24 @@
       p *= this.wounds.arm ? 0.85 : 1;
       p *= this.critical ? 0.8 : 1;
       p *= this.prone ? 1.1 : 1;
+      if (this.legless) p *= 0.55;   // 脚を失った敵は、痛みと失血で狙いが定まらない
+      else if (this.downed) p *= 0.7;
       p *= G.Game.difficulty;
       p = Math.max(0.05, Math.min(0.85, p));
       if (Math.random() < p) {
         G.Effects.tracer(muzzleW, aim);
-        player.hurt(rnd(12, 18), this.pos);
+        // 当たった場所（姿勢で変わる）と威力（ショットガンは近いほど強い）
+        const r = Math.random(), pr = player.posture === 'prone';
+        const area = r < (pr ? 0.08 : 0.06) ? 'head' : r < (pr ? 0.5 : 0.6) ? 'torso' : r < (pr ? 0.75 : 0.8) ? 'arm' : 'leg';
+        let dmg = wpn === 'shotgun' ? (dist < 4 ? rnd(55, 75) : dist < 8 ? rnd(35, 50) : dist < 15 ? rnd(18, 28) : rnd(6, 12)) : wpn === 'pistol' ? rnd(10, 15) : rnd(12, 18);
+        if (area === 'head') dmg = wpn === 'shotgun' && dist < 6 ? 999 : dmg * 2.5;
+        // ショットガンの至近距離：脚がもげる／頭なら即死
+        if (wpn === 'shotgun' && dist < 5 && G.Game.dismember) {
+          if (area === 'leg' && Math.random() < 0.5) player.loseLeg(Math.random() < 0.5 ? 1 : -1, this.pos);
+          if (area === 'arm' && Math.random() < 0.35 && player.loseArm) player.loseArm(Math.random() < 0.5 ? 1 : -1, this.pos);
+          if (area === 'head') player.headLost = true;
+        }
+        player.hurt(dmg, this.pos, area);
       } else {
         const miss = aim.clone().add(V3(rnd(-0.6, 0.6), rnd(-0.4, 0.5), rnd(-0.6, 0.6)));
         const d = miss.sub(eye).normalize();
@@ -552,20 +676,121 @@
       }
     }
     startReload() {
-      if (this.reloadT > 0 || this.ammo === this.magSize) return;
+      if (this.reloadT > 0 || this.switchT > 0 || this.ammo === this.magSize) return;
+      if (this.arms[this.weapon].reserve <= 0) { if (this.weapon === this.primary) this.drawPistol(); return; }
       this.reloadT = this.reloadDur;
-      G.Audio.reload('out', V3(this.pos.x, 1.2, this.pos.z));
+      G.Audio.reload('out', V3(this.pos.x, this.downed ? 0.4 : 1.2, this.pos.z));
+    }
+    finishReload() {
+      const st = this.arms[this.weapon], take = Math.min(this.magSize - this.ammo, st.reserve);
+      st.reserve -= take; this.ammo += take;
+      G.Audio.reload('in', V3(this.pos.x, this.downed ? 0.4 : 1.2, this.pos.z));
+    }
+    // 持ち替え（ハンドガンは主力武器が使えないときだけ）
+    setWeapon(kind) {
+      this.arms[this.weapon].ammo = this.ammo;
+      this.weapon = kind; this.magSize = EWEAPON[kind].mag; this.reloadDur = EWEAPON[kind].reload;
+      this.ammo = this.arms[kind].ammo; this.reloadT = 0; this.switchT = 0.6;
+      this.body.setWeapon(kind); this.burst = 1;
+      G.Audio.reload('grab', V3(this.pos.x, 1.0, this.pos.z));
+    }
+    drawPistol() { if (this.weapon !== 'pistol' && (this.arms.pistol.ammo > 0 || this.arms.pistol.reserve > 0)) this.setWeapon('pistol'); }
+    // 落ち着いたら主力武器へ戻す
+    maybeBackToPrimary() {
+      if (this.weapon !== 'pistol' || this.switchT > 0 || this.reloadT > 0) return;
+      const P = this.arms[this.primary];
+      if (P.ammo + P.reserve <= 0) return;
+      if (this.visible || G.time - this.lastSeenT < 3) return;
+      this.setWeapon(this.primary); if (this.ammo < this.magSize) this.switchT = 0.6, this.startReloadLater = true;
     }
 
     // ---- 1フレームの行動 ----
+    // ---- 立てなくなった（脚に何発も被弾）：這うことしかできないが、見えれば撃ってくる。出血が続く ----
+    goDown(bleed) {
+      if (this.dead) return;
+      this.downed = true;
+      this.prone = true; this.proneT = 1e9; this.wantCrouch = false; this.crouch = 0;
+      this.bleed = Math.max(this.bleed, bleed || 0.7);
+      this.crawlGoal = null; this.goal = null; this.path = null; this.releaseCover && this.releaseCover(); this.cover = null;
+      this.dripT = 0; this.crawlDist = 0;
+      if (this.state !== 'combat') this.setState('combat');
+      this.say('agony', 1.1);
+    }
+    // ---- 脚を失った：同じく這うだけになり、激しく出血する。放っておくと失血死する ----
+    loseLeg(side, dir) {
+      if (this.dead || this.legless) return false;
+      const piece = G.Physics.sever(this.body, { part: 'legs', side, dir });
+      if (!piece) return false;
+      this.legless = side >= 0 ? 'L' : 'R';
+      this.goDown(1.8);
+      this.prone = true; this.proneT = 1e9; this.wantCrouch = false; this.crouch = 0;
+      this.bleed = 1.8;                 // 毎秒の失血（体力）
+      this.crawlGoal = null; this.goal = null; this.path = null; this.cover = null;
+      this.dripT = 0; this.crawlDist = 0;
+      if (this.state !== 'combat') this.setState('combat');
+      this.say('agony', 1.1);
+      return true;
+    }
+    updateLegless(dt, player) {
+      this.stateT += dt; this.alertT = Math.max(0, this.alertT - dt);
+      this.percT -= dt;
+      if (this.percT <= 0) { this.perceive(player, 0.1 + -this.percT); this.percT = 0.1; }
+      if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0) this.body.flash.visible = false; }
+      if (this.reloadT > 0) { this.reloadT -= dt; if (this.reloadT <= 0) this.finishReload(); }
+      if (this.switchT > 0) { this.switchT -= dt; if (this.switchT <= 0 && this.startReloadLater) { this.startReloadLater = false; this.startReload(); } }
+      this.maybeBackToPrimary();
+      // 失血
+      this.hp -= this.bleed * dt;
+      this.dripT -= dt;
+      if (this.dripT <= 0) {
+        this.dripT = 0.45;
+        const h = W().raycast(this.pos.x + (Math.random() - 0.5) * 0.5, 0.4, this.pos.z + (Math.random() - 0.5) * 0.5, 0, -1, 0, 1);
+        if (h && G.Game.gore !== 'off') G.Effects.bloodDecal(h, 0.1 + Math.random() * 0.12);
+      }
+      if (this.hp <= 0) { this.die(0, 0, 'bleed'); return; }
+      this.moanT -= dt;
+      if (this.moanT <= 0) { this.moanT = rnd(2.5, 4.5); this.say(Math.random() < 0.4 ? 'agony' : 'moan'); }
+      this.speed = 0; this.prone = true; this.lean = 0; this.lookPitch *= 0.9;
+      if (this.visible && this.awareness >= 1) {
+        // 伏せたまま撃つ
+        this.crawlGoal = null;
+        if (this.ammo === 0) this.startReload();
+        this.tryFireWhileFacing(player, dt);
+      } else {
+        // 見えていない：撃たれた方から隠れられる場所へ、ゆっくり這っていく
+        const threat = this.lastSeenPos || this.heardPos;
+        if (threat && !this.crawlGoal && this.stateT > 0.5) {
+          const c = this.findCover(threat, 4);
+          if (c) { this.crawlGoal = c.pos.clone(); this.goalTo(this.crawlGoal, 'crawl'); }
+          else this.crawlGoal = this.pos.clone();
+        }
+        if (this.goal) {
+          const before = this.pos.clone();
+          const r = this.followPath(dt, 0.32);
+          this.crawlDist += this.pos.distanceTo(before);
+          if (this.crawlDist > 0.6) { this.crawlDist = 0; G.Audio.gear(V3(this.pos.x, 0.2, this.pos.z), 0.7, false); }
+          if (r === 'arrived' || r === 'fail') this.goal = null;
+        } else if (threat) this.aimAt(V3(threat.x, 0.6, threat.z), dt, 1.5);
+      }
+      this.syncModel(dt);
+    }
+
     update(dt, player) {
       if (this.dead) { this.deadT += dt; this.syncModel(dt); return; }
+      this.updateKnifeWound(dt);
+      if (this.dead) { this.syncModel(dt); return; }
+      if (this.neckWound) {
+        this.speed = 0; this.prone = false; this.lean = 0;
+        this.crouch += (1 - this.crouch) * (1 - Math.exp(-dt * 5));
+        this.lookPitch = 0; this.syncModel(dt); return;
+      }
+      if (this.downed) { this.updateLegless(dt, player); return; }
       this.stateT += dt;
       this.alertT = Math.max(0, this.alertT - dt);
       this.retreatCD -= dt; this.repathT -= dt; this.pushT -= dt; this.dodgeT -= dt; this.standUpT -= dt;
       if (this.state !== 'cover' || !this.cover || this.cover.phase !== 'peek') this.lean = 0;
       if (this.prone && this.state !== 'combat' && this.state !== 'hold') this.prone = false;
-      if (this.hp < 40) { this.moanT -= dt; if (this.moanT <= 0) { this.moanT = rnd(3, 6); G.Audio.voice(this.eyePos(), Math.random() < 0.25 ? 'agony' : 'moan', this.voicePitch, Math.random() < 0.25 ? 0.6 : 1); } }
+      if (this.hp < 40) { this.moanT -= dt; if (this.moanT <= 0) { this.moanT = rnd(3, 6); this.say(Math.random() < 0.25 ? 'agony' : 'moan', Math.random() < 0.25 ? 0.6 : 1); } }
       this.percT -= dt;
       if (this.percT <= 0) { this.perceive(player, 0.1 + -this.percT); this.percT = 0.1; }
       if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0) this.body.flash.visible = false; }
@@ -578,8 +803,10 @@
       }
       if (this.reloadT > 0) {
         this.reloadT -= dt;
-        if (this.reloadT <= 0) { this.ammo = this.magSize; G.Audio.reload('in', V3(this.pos.x, 1.2, this.pos.z)); }
+        if (this.reloadT <= 0) this.finishReload();
       }
+      if (this.switchT > 0) { this.switchT -= dt; if (this.switchT <= 0 && this.startReloadLater) { this.startReloadLater = false; this.startReload(); } }
+      this.maybeBackToPrimary();
       this.speed = 0;
       const now = G.time;
       this.lookPitch *= 0.9;
@@ -650,9 +877,9 @@
           if (this.visible && this.awareness >= 1) { this.setState('combat'); break; }
           if (!this.goal) { this.startSearch(this.clue() || this.pos.clone()); break; }
           const gd = this.goal.distanceTo(this.pos);
-          const cautious = gd < 9 && this.pushT <= 0 && this.role !== 'rusher';
+          const cautious = gd < 13 && this.pushT <= 0;
           this.wantCrouch = cautious;
-          const r = this.followPath(dt, this.pushT > 0 || this.role === 'rusher' ? 3.8 : cautious ? 1.6 : 3.2);
+          const r = this.followPath(dt, this.pushT > 0 ? 3.0 : cautious ? 1.5 : 2.8);
           if (r === 'arrived' || r === 'fail') this.startSearch(this.clue() || this.pos.clone());
           break;
         }
@@ -723,7 +950,7 @@
       const now = G.time;
       const recentlyHurt = now - this.hurtTime < 1.5;
       // 弱った・撃たれた・弾切れ → 遮蔽物へ
-      if (this.retreatCD <= 0 && this.lastSeenPos && (this.hp < 45 || (recentlyHurt && this.hp < 80 && this.role !== 'rusher') || (this.ammo === 0 && this.reloadT <= 0))) {
+      if (this.retreatCD <= 0 && this.lastSeenPos && (this.hp < 60 || (recentlyHurt && this.hp < 90) || (this.ammo === 0 && this.reloadT <= 0 && this.weapon !== 'pistol'))) {
         this.retreatCD = 4;
         if (this.takeCover(this.lastSeenPos, true)) return;
         if (this.visible && this.pos.distanceTo(this.lastSeenPos) > 8 && this.role !== 'rusher') { this.prone = true; this.proneT = rnd(6, 10); this.wantCrouch = false; }
@@ -740,7 +967,8 @@
         }
         if (this.standUpT > 0) { this.tryFireWhileFacing(player, dt); return; }
         if (this.role === 'anchor') this.wantCrouch = dist > 6 || this.critical;
-        else if (this.role === 'rusher' && dist > 5 && !this.critical) this.moveDir(player.pos.x - this.pos.x, player.pos.z - this.pos.z, 2.2, dt, true);
+        // 突撃役：体力に余裕があり、相手が遠いときだけ、しゃがんでゆっくり詰める
+        else if (this.role === 'rusher' && dist > 7 && this.hp > 75 && !this.critical) { this.wantCrouch = true; this.moveDir(player.pos.x - this.pos.x, player.pos.z - this.pos.z, 1.3, dt, true); }
         else {
           // 撃ちながら素早く左右へ動く。距離があればしゃがみ撃ちも混ぜる。瀕死なら膝をついたまま撃つ
           this.strafeT -= dt;
@@ -776,7 +1004,8 @@
         const fp = this.findFlankPoint(target);
         if (fp) { this.flankUsed = true; this.flankDone = false; this.flankTarget = target.clone(); this.setState('flank'); this.goalTo(fp, 'flank1', target); return; }
       }
-      if (this.role === 'rusher' || G.Enemies.pushers() < MAX_PUSHERS) { this.setState('chase'); this.goalTo(this.spreadPoint(target), 'chase', this.role === 'rusher' ? null : target); return; }
+      // 突撃役（ショットガン）も、遮蔽物の陰を通って詰める（まっすぐ突っ込まない）
+      if (G.Enemies.pushers() < MAX_PUSHERS) { this.setState('chase'); this.goalTo(this.spreadPoint(target), 'chase', target); return; }
       this.startHold(target);
     }
 
@@ -850,17 +1079,17 @@
       const combatish = this.state === 'combat' || this.state === 'hold' || this.state === 'cover' || this.state === 'suspicious' || (this.state === 'guard' && this.alertT > 0) || this.state === 'chase' || this.state === 'flank';
       b.update({
         dt: Math.max(dt, 1e-4), speed: this.dead ? 0 : this.speed, crouch: this.crouch,
-        aim: combatish ? 1 : (this.alertT > 0 ? 0.6 : 0),
+        aim: this.neckWound ? 0 : combatish ? 1 : (this.alertT > 0 ? 0.6 : 0),
         aimPitch: this.lookPitch, twist: angDiff(this.bodyYaw, this.lookYaw),
         reload: this.reloadT > 0 ? 1 - this.reloadT / this.reloadDur : -1,
         scene: G.Enemies.scene,
         lean: this.lean, prone: this.prone,
-        hunch: this.critical ? 1 : this.wounds.stomach ? 0.6 : 0,
+        hunch: this.neckWound || this.critical ? 1 : this.wounds.stomach ? 0.6 : 0,
         limp: this.wounds.leg ? Math.min(1, 0.65 + 0.2 * this.wounds.leg) : 0, limpSide: this.limpSide,
       });
     }
 
-    remove(scene) { scene.remove(this.body.root); if (this.body.st.gunDropped) scene.remove(this.body.gun); }
+    remove(scene) { scene.remove(this.body.root); if (this.body.st.gunDropped) scene.remove(this.body.gun); this.body.dispose(); }
 
     updateDebugPath() {
       const D = G.Enemies.debugGroup; if (!D) return;
@@ -879,6 +1108,7 @@
   // 初期位置と役割（守備役4・小銃手3・迂回役3・突撃役2）
   const SPAWNS = G.World.def.spawns;   // マップごとの初期位置と役割
   const E = G.Enemies = {
+    invalidateCover() { G.coverInvalidate(); },
     list: [], reserved: new Set(), debugOn: false, debugGroup: null, scene: null, radioQueue: [],
     STATE_JA, ROLE_JA, SPAWNS,
     spawn(scene) {
@@ -899,13 +1129,13 @@
       this.list = []; this.reserved.clear(); this.radioQueue = [];
     },
     update(dt, player) {
-      Path.budget = 3;
+      Path.budget = 2;   // 経路探索は1フレームに2回まで（重い計算が重ならないように）
       // 無線は少し遅れて届く
       for (let i = this.radioQueue.length - 1; i >= 0; i--) {
         const r = this.radioQueue[i]; r.t -= dt;
         if (r.t <= 0) { this.radioQueue.splice(i, 1); if (!r.to.dead) r.to.receiveReport(r.pos, r.vel); }
       }
-      for (const e of this.list) e.update(dt, player);
+      for (const e of this.list) e.update(dt, e.dead ? player : e.pickTarget(player));
       if (this.debugOn) for (const e of this.list) {
         e.debug.seen.visible = !!e.lastSeenPos && !e.dead; if (e.lastSeenPos) e.debug.seen.position.set(e.lastSeenPos.x, 0.15, e.lastSeenPos.z);
         e.debug.heard.visible = !!e.heardPos && !e.dead; if (e.heardPos) e.debug.heard.position.set(e.heardPos.x, 0.3, e.heardPos.z);

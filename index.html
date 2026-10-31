@@ -2,8 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>制圧 SEIATSU — タクティカルFPS試作</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>制圧 SEIATSU v11 — タクティカルFPS試作</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -19,6 +19,7 @@
   <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="c"></i></div>
   <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
   <div id="scope" aria-hidden="true">
+    <div class="scope-glass"></div>
     <svg class="reticle" viewBox="-100 -100 200 200" preserveAspectRatio="xMidYMid meet">
       <line x1="-100" y1="0" x2="-6" y2="0"/><line x1="6" y1="0" x2="100" y2="0"/>
       <line x1="0" y1="-100" x2="0" y2="-6"/><line x1="0" y1="6" x2="0" y2="100"/>
@@ -33,18 +34,55 @@
   <div id="vignette"></div>
   <div id="dmg-dirs"></div>
   <div id="msg"></div>
+  <div id="radio-line" role="status" aria-live="polite"><b id="radio-speaker"></b><span id="radio-text"></span><span id="radio-ja" lang="ja"></span></div>
+  <div id="order-marker" aria-hidden="true"><i></i><span>MOVE HERE</span></div>
   <div id="reload-bar"><div id="reload-fill"></div><span>リロード中</span></div>
+  <div id="allies"></div>
+  <div id="squad-select" aria-label="移動指示の対象"><span>移動指示：Z　対象切替：Shift＋Z</span><div><button type="button" data-squad="both" aria-pressed="true">両方</button><button type="button" data-squad="alpha" aria-pressed="false">ALPHA</button><button type="button" data-squad="bravo" aria-pressed="false">BRAVO</button></div></div>
+  <div id="med"><div id="bleed"></div><div id="med-items"></div></div>
+  <div id="treatbar"><span></span><b><i></i></b></div>
   <div id="hp"><div class="row"><span id="hp-num">100</span><span class="unit">体力</span></div><div class="bar"><div id="hp-fill"></div></div><div id="posture">立ち</div></div>
   <div id="ammo"><div id="weapon-slots"></div><div class="row"><span id="ammo-cur">30</span><span class="sep">/</span><span id="ammo-res">240</span></div><div class="weapon" id="weapon-name">AR-7 アサルトライフル</div></div>
   <div id="hint"></div>
   <div id="debug"><div id="debug-labels"></div><div id="dbg-fps"></div></div>
 </div>
 
+<!-- タッチ操作（スマートフォンでは自動表示） -->
+<div id="touch-controls" hidden aria-label="ゲームのタッチ操作">
+  <div id="touch-left">
+    <div class="touch-postures">
+      <button data-touch="sprint" aria-pressed="false">走る</button>
+      <button data-touch="crouch">しゃがむ</button>
+      <button data-touch="prone">伏せる</button>
+    </div>
+    <div id="touch-stick" aria-label="移動スティック"><span>移動</span><i id="touch-knob"></i></div>
+  </div>
+  <div id="touch-actions">
+    <button data-touch="ads" aria-pressed="false">照準</button>
+    <button data-touch="jump">ジャンプ</button>
+    <button data-touch="fire" class="touch-fire">射撃</button>
+    <button data-touch="reload">リロード</button>
+    <button data-touch="nextWeapon">武器切替</button>
+    <button data-touch="grenade">手榴弾</button>
+    <button data-touch="knife">ナイフ</button>
+    <button data-touch="treat" class="touch-treat">治療</button>
+    <button data-touch="more" aria-expanded="false" aria-controls="touch-extra">操作＋</button>
+  </div>
+  <div id="touch-extra" hidden>
+    <button data-touch="leanL">左リーン</button><button data-touch="leanR">右リーン</button>
+    <button data-touch="zoomOut">倍率 −</button><button data-touch="zoomIn">倍率 ＋</button>
+    <button data-touch="suppressor">消音器</button>
+    <button data-touch="command">追従／待機</button><button data-touch="moveOrder">照準へ移動</button>
+  </div>
+  <button id="touch-pause" data-touch="pause" aria-label="一時停止">Ⅱ</button>
+  <span id="touch-look-hint">スワイプで視点</span>
+</div>
+
 <!-- タイトル・中断メニュー -->
 <div id="menu">
   <div id="menu-main">
     <div class="stripe"></div>
-    <h1>制圧<span class="romaji">SEIATSU</span></h1>
+    <h1>制圧<span class="romaji">SEIATSU v11</span></h1>
     <p class="lede">敵が12人います。慎重に進み、全員を排除して開始地点の脱出地点へ戻ってください。</p>
     <label class="map-pick">作戦地域
       <select id="map-select"></select>
@@ -52,7 +90,7 @@
     <p id="map-desc" class="map-desc"></p>
     <p class="paused-label">一時停止中</p>
     <div class="actions">
-      <button id="btn-start" class="primary only-main">出撃する</button>
+      <button id="btn-start" class="primary only-main">装備を整えて出撃</button>
       <button id="btn-resume" class="primary only-pause">再開する</button>
       <button id="btn-restart" class="only-pause">最初からやり直す</button>
       <button data-open="loadout">装備</button>
@@ -68,11 +106,13 @@
 
   <section class="panel" id="panel-controls">
     <h2>操作一覧</h2>
+    <p class="small">スマホ：左スティックで移動、画面の空いている場所をスワイプして視点を動かします。射撃は長押し、照準・走るは切り替え。手榴弾は長押しで構え、離して投げます。「操作＋」にリーン・倍率・消音器があります。横向き推奨です。</p>
     <table class="list">
       <tr><td>移動</td><td>W A S D</td></tr>
       <tr><td>視点</td><td>マウス</td></tr>
       <tr><td>射撃</td><td>左クリック（押し続けると連射）</td></tr>
-      <tr><td>照準・スコープ</td><td>右クリックを押している間。ホイール、または X（上げる）／Z（下げる）で2〜8倍（0.5刻み）</td></tr>
+      <tr><td>照準・スコープ</td><td>右クリックを押している間。ホイール、または ＋（上げる）／−（下げる）で2〜8倍（0.5刻み）</td></tr>
+      <tr><td>ジャンプ</td><td>Space（スペースキー）。着地してから再び跳べます</td></tr>
       <tr><td>リロード</td><td>R</td></tr>
       <tr><td>リーン</td><td>Q で左、E で右。もう一度押すと中央へ。Q と E で直接切り替え</td></tr>
       <tr><td>しゃがみ</td><td>C（切り替え）</td></tr>
@@ -80,9 +120,12 @@
       <tr><td>ダッシュ</td><td>左Shift を押している間（立ち姿勢で前進中のみ）</td></tr>
       <tr><td>近接ナイフ</td><td>V</td></tr>
       <tr><td>サプレッサー</td><td>T で取り付け・取り外し（ライフルとハンドガン）。出撃前は「装備」で選べる</td></tr>
-      <tr><td>武器の持ち替え</td><td>1 アサルトライフル／2 ハンドガン／3 ショットガン（設定でホイールに割り当てることもできる）</td></tr>
+      <tr><td>武器の持ち替え</td><td>1 アサルトライフル／2 ハンドガン／3 ショットガン（照準していないときのホイール上下でも切替）</td></tr>
       <tr><td>手りゅう弾</td><td>G またはマウス中央クリック（ホイールの押し込み）を押し続けると構え、落ちる場所までの軌道と爆風の範囲が表示される。離すと投げる（2.6秒後に爆発）。最初は2個、敵の落とした弾薬から補充できることがある</td></tr>
-      <tr><td>歩く速さ</td><td>照準していないときにホイールを上下すると5段階（35〜100％）で変わる。左Alt を押している間は最も遅く歩く。遅いほど足音が小さく、敵に聞かれにくい</td></tr>
+      <tr><td>歩く速さ</td><td>Xを押している間は通常の20％の速さで忍び歩き。足音はほぼ無音になり、敵に聞かれにくい</td></tr>
+      <tr><td>医療品</td><td>H で出血の処置。出血がなければ治療薬で体力を回復</td></tr>
+      <tr><td>仲間へ移動指示</td><td>照準を向けて Z。Shift＋Z で対象を「両方／ALPHA／BRAVO」から切り替え</td></tr>
+      <tr><td>仲間の追従／待機</td><td>F で切り替え。移動指示も解除</td></tr>
       <tr><td>AI状態の表示</td><td>F3</td></tr>
       <tr><td>一時停止</td><td>Esc</td></tr>
     </table>
@@ -102,7 +145,13 @@
 
   <section class="panel" id="panel-loadout">
     <h2>装備</h2>
-    <p class="small">出撃前に選びます（変えるとすぐ反映されます）。ゲーム中も T キーでサプレッサーを付け外しできます。</p>
+    <p class="small">武器、医療品、同行する仲間を選んでから出撃します。ゲーム中も T キーでサプレッサーを付け外しできます。</p>
+    <h3 class="sub">同行する仲間</h3>
+    <div id="lo-allies" class="ally-pick" role="radiogroup" aria-label="同行する仲間の人数">
+      <label><input type="radio" name="lo-allies" value="0"><b>単独</b><small>仲間なし</small></label>
+      <label><input type="radio" name="lo-allies" value="1"><b>ALPHA</b><small>1人同行</small></label>
+      <label><input type="radio" name="lo-allies" value="2"><b>ALPHA ＋ BRAVO</b><small>2人同行</small></label>
+    </div>
     <h3 class="sub">AR-7 アサルトライフル</h3>
     <label class="field">照準器
       <select id="lo-optic"><option value="scope">長距離スコープ（2〜8倍。遠くの敵向き）</option><option value="dot">近距離ドットサイト（1.3倍。素早く狙える、周りが見える）</option></select>
@@ -112,7 +161,17 @@
     <label class="field check"><input id="lo-pistolsup" type="checkbox"> サプレッサーを付ける</label>
     <h3 class="sub">S-12 ショットガン</h3>
     <p class="small">付けられるものはありません。</p>
+    <h3 class="sub">医療ポーチ</h3>
+    <p class="small">H キーで出血している傷から処置します。出血がないときは治療薬で体力を30回復できます。処置中は射撃できません。</p>
+    <div class="med-pick">
+      <div><b>止血帯</b><small>手足の激しい出血を止める（3秒）</small><span class="stepper"><button data-med="tq" data-d="-1">−</button><em id="lo-tq">1</em><button data-med="tq" data-d="1">＋</button></span></div>
+      <div><b>止血剤</b><small>胴体の激しい出血を止める（4秒）</small><span class="stepper"><button data-med="hemo" data-d="-1">−</button><em id="lo-hemo">1</em><button data-med="hemo" data-d="1">＋</button></span></div>
+      <div><b>包帯</b><small>軽い出血を止める（2.5秒）。激しい出血には押さえるだけ</small><span class="stepper"><button data-med="band" data-d="-1">−</button><em id="lo-band">2</em><button data-med="band" data-d="1">＋</button></span></div>
+      <div><b>治療薬</b><small>出血がないとき体力を30回復（1.8秒）</small><span class="stepper"><button data-med="medicine" data-d="-1">−</button><em id="lo-medicine">1</em><button data-med="medicine" data-d="1">＋</button></span></div>
+      <p id="lo-med-room" class="small"></p>
+    </div>
     <p class="small">サプレッサーを付けると、銃声がくぐもり、敵に聞こえる距離が約3割になり、発射炎もほとんど出なくなります。威力・命中は変わりません。</p>
+    <button id="btn-deploy" class="primary">この装備で出撃</button>
     <button data-close>戻る</button>
   </section>
 
@@ -134,10 +193,16 @@
 
   <section class="panel" id="panel-settings">
     <h2>設定</h2>
+    <label class="field">画面の操作ボタン
+      <select id="touch-mode"><option value="auto">自動（スマホ・タブレット）</option><option value="on">表示</option><option value="off">非表示</option></select>
+    </label>
+    <div class="actions"><button id="btn-voice-preview" type="button">プレイヤーの声を試聴</button></div>
+    <p class="small">プレイヤーの被弾音声は人間の録音を使用しています。</p>
     <label class="field">マウス感度 <span id="sens-val">1.00</span><input id="sens" type="range" min="0.2" max="3" step="0.05"></label>
     <label class="field">敵の命中精度
       <select id="diff"><option value="0.65">低い（練習向け）</option><option value="1">標準</option><option value="1.3">高い</option></select>
     </label>
+    <label class="field check"><input id="dismember" type="checkbox"> ショットガンによる頭・腕・脚の吹き飛び</label>
     <label class="field">流血表現
       <select id="gore"><option value="on">オン</option><option value="low">控えめ</option><option value="off">オフ</option></select>
     </label>
@@ -145,11 +210,14 @@
       <select id="quality"><option value="high">高（高解像度・影・画面効果）</option><option value="standard">標準（影・画面効果）</option><option value="low">軽量（影と画面効果なし・照明を減らす）</option></select>
     </label>
     <label class="field check"><input id="show-fps" type="checkbox"> フレームレートを画面右上に表示</label>
+    <label class="field">AIの仲間
+      <select id="ally-count"><option value="2">2人と一緒に戦う</option><option value="1">ALPHAと2人で戦う</option><option value="0">単独で戦う</option></select>
+    </label>
     <label class="field">チームの色（腕章）
       <select id="team"><option value="red">赤</option><option value="blue">青</option></select>
     </label>
     <label class="field">照準していないときのホイール
-      <select id="wheelmode"><option value="speed">歩く速さを変える（上で速く、下で遅く）</option><option value="weapon">武器を持ち替える</option></select>
+      <select id="wheelmode"><option value="weapon">武器を持ち替える（スコープ中は倍率変更）</option></select>
     </label>
     <label class="field">足音・装備の音の大きさ <span id="stepvol-val">100%</span><input id="stepvol" type="range" min="0" max="1.5" step="0.05"></label>
     <label class="field">マウスの動き
@@ -194,13 +262,23 @@
 <script src="js/lib/RoomEnvironment.js"></script>
 <script src="js/input.js"></script>
 <script src="js/gamepad.js"></script>
+<script src="js/touch.js"></script>
 <script src="js/world.js"></script>
+<script src="js/lib/cannon-es.js"></script>
+<script src="js/destruction.js"></script>
+<script src="js/surfaces.js"></script>
+<script src="js/sever-geometry.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/player-voice-data.js"></script>
+<script src="js/radio-voice-data.js"></script>
+<script src="js/footstep-data.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/effects.js"></script>
 <script src="js/grenade.js"></script>
 <script src="js/viewmodel.js"></script>
 <script src="js/humanoid.js"></script>
 <script src="js/enemy.js"></script>
+<script src="js/ally.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>
