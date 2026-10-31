@@ -25,10 +25,12 @@
   A.casingHit = oldHit;
   const levels=[],oldOut=A.out;A.out=(pos,gain)=>{levels.push(gain);return null;};
   A.casingHit(P.pos,'ar','concrete',4,false);A.casingHit(P.pos,'ar','carpet',4,false);A.casingHit(P.pos,'ar','concrete',4,true);A.out=oldOut;
-  ok('薬きょう着地音を大きくしつつ柔らかい床と再跳躍は控える',levels[0]>.3&&levels[1]<levels[0]&&levels[2]<levels[0]);
+  ok('薬きょうの音量をv12より下げ、柔らかい床と再跳躍はさらに控える',levels[0]>.1&&levels[0]<.23&&levels[1]<levels[0]&&levels[2]<levels[0]);
   A.prepareCasingBank();const bank=A.casingBank;
   const tail=b=>{const a=b.getChannelData(0);let energy=0;for(let i=1600;i<4800;i++)energy+=a[i]*a[i];return energy;};
   ok('3種類の薬きょうと5種類の床材に着地音を用意',Object.keys(bank).length===15&&Object.values(bank).every(v=>v.length===3));
+  const rings=Object.values(bank).flat().map(b=>{const a=b.getChannelData(0);let all=0,late=0;for(let i=0;i<a.length;i++){all+=a[i]*a[i];if(i>b.sampleRate*.06)late+=a[i]*a[i];}return late/all;});
+  ok('鈴のような長い余韻を残さない（60ms以降はエネルギーの0.5％未満）',rings.every(v=>v<.005),Math.max(...rings).toFixed(5));
   ok('金属床は長く鳴り、木とカーペットは金属の余韻を吸収',tail(bank['ar:metal'][0])>tail(bank['ar:concrete'][0])&&tail(bank['ar:concrete'][0])>tail(bank['ar:wood'][0])&&tail(bank['ar:wood'][0])>tail(bank['ar:carpet'][0]));
   const oldOsc=A.ctx.createOscillator;let oscillators=0;A.ctx.createOscillator=()=>{oscillators++;return oldOsc.call(A.ctx);};
   try{const hit=A.casingHit(P.pos,'pistol','metal',4,false);ok('着地時は事前生成した金属音を使い、発射中の合成負荷を抑える',!!hit&&bank['pistol:metal'].includes(hit.buffer)&&oscillators===0);hit?.stop();}finally{A.ctx.createOscillator=oldOsc;}

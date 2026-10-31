@@ -234,22 +234,25 @@
     prepareCasingBank() {
       if(this.casingBank||!this.ctx)return;
       this.casingBank={};
-      const sr=32000,n=Math.floor(sr*.32),ratios=[1,1.53,2.19,2.87],levels=[.4,.24,.13,.07],tails=[.047,.032,.019,.011];
+      // A short brass contact, not a sustained pitched chime. The broadband impact
+      // leads; low-level, heavily damped inharmonic modes only supply the metal texture.
+      const sr=32000,n=Math.floor(sr*.16),ratios=[1,1.53,2.19,2.87],levels=[.22,.13,.065,.025],tails=[.015,.009,.006,.004];
       for(const kind of ['ar','pistol','shotgun'])for(const floor of ['concrete','metal','wood','carpet','grass']){
         const soft=floor==='carpet'||floor==='grass',wood=floor==='wood',metal=floor==='metal';
-        const damping=soft?.12:wood?.42:metal?1.65:1;
+        const damping=soft?.12:wood?.42:metal?1.2:1;
         const resonance=(soft?.08:wood?.42:1)*(kind==='shotgun'?.48:1);
         const bank=this.casingBank[kind+':'+floor]=[];
         for(let variant=0;variant<3;variant++){
           const buffer=this.newBuffer(n,sr),out=buffer.getChannelData(0);
-          const base=(kind==='ar'?3100:kind==='pistol'?3700:2500)*(1+(variant-1)*.035);
-          let seed=173+variant*101,previous=0;
+          const base=(kind==='ar'?1700:kind==='pistol'?2100:1400)*(1+(variant-1)*.035);
+          let seed=173+variant*101,previous=0,grain=0;
           for(let i=0;i<n;i++){
             const t=i/sr;seed=(seed*16807)%2147483647;const noise=seed/1073741824-1;
-            let sample=(noise-previous*.9)*.24*Math.exp(-t/(soft?.004:.0025));previous=noise;
+            grain=.58*grain+.42*noise;
+            let sample=grain*.4*Math.exp(-t/(soft?.003:.0065))+(noise-previous)*.065*Math.exp(-t/.002);previous=noise;
             for(let mode=0;mode<4;mode++)sample+=Math.sin(2*Math.PI*base*ratios[mode]*t)*levels[mode]*resonance*Math.exp(-t/(tails[mode]*damping));
             if(wood)sample+=noise*.15*Math.exp(-t/.009);
-            if(metal)sample+=Math.sin(2*Math.PI*1320*t)*.08*Math.exp(-t/.045);
+            if(metal)sample+=grain*.12*Math.exp(-t/.012);
             out[i]=sample*Math.min(1,i/8)*Math.min(1,(n-i-1)/160);
           }
           bank.push(buffer);
@@ -260,8 +263,8 @@
       if (!this.ok || speed < .45) return;
       const soft = surface === 'carpet' || surface === 'grass';
       const metal = surface === 'metal';
-      const volume = 1.6 * Math.min(.33, Math.max(.035, speed * .055)) * (soft ? .22 : 1) * (bounce ? .42 : 1);
-      const d = this.out(pos, volume, { life: .4, reverb: metal?.12:.055, ref: .7, rolloff: 1.35 });
+      const volume = .95 * Math.min(.33, Math.max(.035, speed * .055)) * (soft ? .22 : 1) * (bounce ? .42 : 1);
+      const d = this.out(pos, volume, { life: .24, reverb: metal?.045:.018, ref: .7, rolloff: 1.35 });
       if (!d) return;
       this.prepareCasingBank();
       const bank=this.casingBank[kind+':'+surface]||this.casingBank['ar:concrete'];
