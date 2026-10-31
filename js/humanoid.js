@@ -98,10 +98,10 @@
       new THREE.MeshStandardMaterial({ color: lin(0x141516), roughness: 0.9, skinning: true }),                  // 2 目出し帽
       new THREE.MeshStandardMaterial({ color: lin(0x1a1b1d), roughness: 0.55, metalness: 0.2, skinning: true }), // 3 ヘルメット
       new THREE.MeshStandardMaterial({ color: lin(0x111112), roughness: 0.6, skinning: true }),                  // 4 靴・手袋
-      new THREE.MeshStandardMaterial({ color: lin(0x0b0c0d), roughness: 0.12, metalness: 0.7, skinning: true }), // 5 ゴーグル
+      new THREE.MeshStandardMaterial({ color: lin(0x263034), roughness: 0.18, metalness: 0.2, skinning: true }), // 5 ゴーグル
       new THREE.MeshStandardMaterial({ color: lin(TEAM_COLORS[team] || TEAM_COLORS.red), roughness: 0.6, emissive: lin(TEAM_COLORS[team] || TEAM_COLORS.red), emissiveIntensity: 0.12, skinning: true }), // 6 腕章
     ];
-    set.push(new THREE.MeshStandardMaterial({color:lin(0xb18d72),roughness:.93,skinning:true}),new THREE.MeshStandardMaterial({color:lin(0x242321),roughness:1,skinning:true}),unitPatch('SEIATSU'));
+    set.push(new THREE.MeshStandardMaterial({color:lin(0xb18d72),roughness:.93,skinning:true}),new THREE.MeshStandardMaterial({color:lin(0x242321),roughness:1,skinning:true}),unitPatch('SWAT'));
     for (const m of set) m.envMapIntensity = 0.3;
     MATSETS[key] = set;
     return set;
@@ -185,6 +185,7 @@
     P('chest', 0, sphere(0.085, 1.1, 1, 1.1), -0.225, 0.19, 0);
     // 首・頭
     P('neck',7,organic([[.067,0],[.063,.5],[.067,1]],.12),0,.1,0,0,0,0,true,.12);
+    P('neck',2,new THREE.TorusGeometry(.066,.014,8,24),0,.025,0,Math.PI/2);
     P('head',7,sphere(.103,.92,1.12,1),0,.1,.008);
     P('head',7,rbox(.128,.08,.11,.035),0,.025,.037); // jaw
     P('head',8,hemi(.104),0,.13,-.005); // close-cropped hair, uncovered face
@@ -334,21 +335,46 @@
   // Small shared accessories follow the head bone, including during a ragdoll.
   const HEAD_GEAR={}, RIGID_MATERIALS=new WeakMap();
   function rigidMaterials(materials){let set=RIGID_MATERIALS.get(materials);if(!set){set=materials.map(m=>{const copy=m.clone();copy.skinning=false;return copy;});RIGID_MATERIALS.set(materials,set);}return set;}
-  function headGear(variant,M){
+  function headGear(variant,M,style){
     if(!variant||variant==='none')return null;
     M=rigidMaterials(M);
     if(!HEAD_GEAR.helmet){
-      const shell=hemi(.142);shell.scale(1,.94,1.04);shell.translate(0,.137,-.007);HEAD_GEAR.helmet=shell;
-      HEAD_GEAR.rim=rbox(.277,.022,.288,.008);HEAD_GEAR.lens=rbox(.076,.045,.014,.008);HEAD_GEAR.frame=rbox(.087,.055,.018,.009);
+      // Rounded ballistic shell: raised brow, curved ear coverage and a lower rear edge.
+      const point=(phi,t)=>{const end=1.6+.2*(1-Math.cos(phi))+.14*Math.abs(Math.sin(phi)),a=end*t;return V3(.118*Math.sin(a)*Math.sin(phi),.14+.126*Math.cos(a),.128*Math.sin(a)*Math.cos(phi)+.008);};
+      const positions=[],indices=[],rings=14,segments=36;
+      for(let j=0;j<=rings;j++)for(let i=0;i<=segments;i++){const p=point(i/segments*Math.PI*2,j/rings);positions.push(p.x,p.y,p.z);}
+      for(let j=0;j<rings;j++)for(let i=0;i<segments;i++){const a=j*(segments+1)+i,b=a+segments+1;indices.push(a,b,a+1,b,b+1,a+1);}
+      const shell=new THREE.BufferGeometry();shell.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));shell.setIndex(indices);shell.computeVertexNormals();HEAD_GEAR.helmet=shell;
+      const edge=[];for(let i=0;i<segments;i++)edge.push(point(i/segments*Math.PI*2,1));
+      HEAD_GEAR.rim=new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edge,true),72,.004,6,true);
+      const goggles=new THREE.Shape();goggles.moveTo(-.11,.025);goggles.quadraticCurveTo(-.105,.045,-.055,.041);goggles.quadraticCurveTo(0,.033,.055,.041);goggles.quadraticCurveTo(.118,.046,.114,.008);goggles.quadraticCurveTo(.116,-.035,.066,-.033);goggles.quadraticCurveTo(.025,-.035,.012,-.015);goggles.quadraticCurveTo(0,-.005,-.012,-.015);goggles.quadraticCurveTo(-.035,-.041,-.078,-.031);goggles.quadraticCurveTo(-.12,-.03,-.11,.025);
+      HEAD_GEAR.goggleFrame=new THREE.ExtrudeGeometry(goggles,{depth:.014,bevelEnabled:true,bevelSize:.003,bevelThickness:.003,bevelSegments:2,steps:1,curveSegments:8});
+      const lens=new THREE.Shape();lens.moveTo(-.037,-.019);lens.quadraticCurveTo(-.047,0,-.035,.019);lens.quadraticCurveTo(0,.026,.036,.019);lens.quadraticCurveTo(.047,0,.035,-.019);lens.quadraticCurveTo(0,-.026,-.037,-.019);
+      HEAD_GEAR.goggleGlass=new THREE.ExtrudeGeometry(lens,{depth:.003,bevelEnabled:true,bevelSize:.002,bevelThickness:.002,bevelSegments:2,steps:1,curveSegments:8});
+      HEAD_GEAR.band=new THREE.CylinderGeometry(.112,.112,.024,32,1,true);HEAD_GEAR.band.scale(1,1,1.11);
+      HEAD_GEAR.mask=new THREE.LatheGeometry([new THREE.Vector2(.061,-.09),new THREE.Vector2(.065,-.04),new THREE.Vector2(.087,.005),new THREE.Vector2(.105,.05),new THREE.Vector2(.103,.092)],28);
+      const cloth=HEAD_GEAR.mask.attributes.position;
+      for(let i=0;i<cloth.count;i++)if(cloth.getY(i)>.08)cloth.setY(i,cloth.getY(i)+.019*Math.pow(Math.max(0,cloth.getZ(i)/.103),8));
+      HEAD_GEAR.mask.computeVertexNormals();
+      HEAD_GEAR.chin=rbox(.062,.018,.018,.005);
+      HEAD_GEAR.lens=rbox(.076,.045,.014,.008);HEAD_GEAR.frame=rbox(.087,.055,.018,.009);
       HEAD_GEAR.bridge=rbox(.032,.008,.015,.002);HEAD_GEAR.temple=rbox(.009,.012,.105,.003);HEAD_GEAR.strap=rbox(.014,.12,.014,.003);
     }
     const root=new THREE.Group();root.name='head-equipment';root.userData.variant=variant;
     const add=(geo,mat,x,y,z)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=true;root.add(m);return m;};
     if(variant.includes('helmet')){
-      add(HEAD_GEAR.helmet,M[3],0,0,0);add(HEAD_GEAR.rim,M[3],0,.135,-.007);
-      for(const side of [-1,1])add(HEAD_GEAR.strap,M[4],side*.094,.077,-.01).rotation.z=side*.13;
+      const shell=add(HEAD_GEAR.helmet,M[3],0,0,0);shell.name='ballistic-shell';
+      add(HEAD_GEAR.rim,M[4],0,0,0).name='curved-rim';
+      add(HEAD_GEAR.band,M[4],0,.191,.008);
+      add(HEAD_GEAR.goggleFrame,M[4],0,.198,.12).name='forehead-goggle-frame';
+      for(const side of [-1,1]){
+        const lens=add(HEAD_GEAR.goggleGlass,M[5],side*.052,.199,.139);lens.rotation.y=side*.10;
+        const strap=add(HEAD_GEAR.strap,M[4],side*.075,.028,.033);strap.rotation.z=-side*.48;
+      }
+      add(HEAD_GEAR.chin,M[4],0,-.02,.055);
+      if(style==='swat'){add(HEAD_GEAR.mask,M[2],0,0,.024).name='face-cover';}
     }
-    if(variant.includes('sunglasses')){
+    if(variant.includes('sunglasses')&&!(style==='swat'&&variant.includes('helmet'))){
       for(const side of [-1,1]){add(HEAD_GEAR.frame,M[4],side*.047,.115,.109);add(HEAD_GEAR.lens,M[5],side*.047,.115,.121);add(HEAD_GEAR.temple,M[4],side*.092,.127,.061);}
       add(HEAD_GEAR.bridge,M[4],0,.12,.119);
     }
@@ -409,7 +435,7 @@
       const fall = new THREE.Group();          // 倒れるときの回転軸（足元）
       fall.add(mesh);
       const root = new THREE.Group(); root.add(fall);
-      const gear=headGear(opts.gear,M);if(gear)bones.head.add(gear);
+      const gear=headGear(opts.gear,M,opts.style);if(gear)bones.head.add(gear);
 
       // 小銃：胸の骨の子として右肩側に持つ
       const gunPivot = new THREE.Object3D(); gunPivot.position.set(-0.09, 0.12, 0.1); bones.chest.add(gunPivot);

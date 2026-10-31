@@ -56,6 +56,7 @@
       return this.ctx.createBuffer(1, n, SR);
     },
     prepare() {
+      this.prepareCasingBank();
       const idle = window.requestIdleCallback || ((f) => setTimeout(f, 200));
       idle(() => { try { this.makeStepBank(); } catch (e) { } idle(() => { try { this.makeVoiceBank(true); } catch (e) { } }); });
     },
@@ -230,19 +231,42 @@
       this.noiseBurst(d, t + 0.02, 0.5, 'lowpass', 420, 0.4, 0.25, 0.01);   // 尾
       if (isPlayer) this.noiseBurst(d, t, 0.025, 'highpass', 5000, 0.8, 0.35, 0.001); // 機関部の金属音
     },
+    prepareCasingBank() {
+      if(this.casingBank||!this.ctx)return;
+      this.casingBank={};
+      const sr=32000,n=Math.floor(sr*.32),ratios=[1,1.53,2.19,2.87],levels=[.4,.24,.13,.07],tails=[.047,.032,.019,.011];
+      for(const kind of ['ar','pistol','shotgun'])for(const floor of ['concrete','metal','wood','carpet','grass']){
+        const soft=floor==='carpet'||floor==='grass',wood=floor==='wood',metal=floor==='metal';
+        const damping=soft?.12:wood?.42:metal?1.65:1;
+        const resonance=(soft?.08:wood?.42:1)*(kind==='shotgun'?.48:1);
+        const bank=this.casingBank[kind+':'+floor]=[];
+        for(let variant=0;variant<3;variant++){
+          const buffer=this.newBuffer(n,sr),out=buffer.getChannelData(0);
+          const base=(kind==='ar'?3100:kind==='pistol'?3700:2500)*(1+(variant-1)*.035);
+          let seed=173+variant*101,previous=0;
+          for(let i=0;i<n;i++){
+            const t=i/sr;seed=(seed*16807)%2147483647;const noise=seed/1073741824-1;
+            let sample=(noise-previous*.9)*.24*Math.exp(-t/(soft?.004:.0025));previous=noise;
+            for(let mode=0;mode<4;mode++)sample+=Math.sin(2*Math.PI*base*ratios[mode]*t)*levels[mode]*resonance*Math.exp(-t/(tails[mode]*damping));
+            if(wood)sample+=noise*.15*Math.exp(-t/.009);
+            if(metal)sample+=Math.sin(2*Math.PI*1320*t)*.08*Math.exp(-t/.045);
+            out[i]=sample*Math.min(1,i/8)*Math.min(1,(n-i-1)/160);
+          }
+          bank.push(buffer);
+        }
+      }
+    },
     casingHit(pos, kind, surface, speed, bounce) {
       if (!this.ok || speed < .45) return;
       const soft = surface === 'carpet' || surface === 'grass';
       const metal = surface === 'metal';
-      const volume = 1.6 * Math.min(.33, Math.max(.035, speed * .055)) * (soft ? .22 : bounce ? .42 : 1);
-      const d = this.out(pos, volume, { life: .24, reverb: .22, ref: .7, rolloff: 1.35 });
+      const volume = 1.6 * Math.min(.33, Math.max(.035, speed * .055)) * (soft ? .22 : 1) * (bounce ? .42 : 1);
+      const d = this.out(pos, volume, { life: .4, reverb: metal?.12:.055, ref: .7, rolloff: 1.35 });
       if (!d) return;
-      const t = this.ctx.currentTime, factor = kind === 'shotgun' ? .62 : kind === 'pistol' ? 1.17 : 1;
-      this.noiseBurst(d, t, soft ? .018 : .012, 'bandpass', (metal ? 4200 : 3100) * factor, 2.8, .75, .001);
-      if (!soft) {
-        this.tone(d, t, metal ? .18 : .09, 'sine', (metal ? 2600 : 1900) * factor, (metal ? 1700 : 1200) * factor, .25);
-        this.tone(d, t + .003, metal ? .13 : .07, 'sine', 1260 * factor, 870 * factor, .14);
-      }
+      this.prepareCasingBank();
+      const bank=this.casingBank[kind+':'+surface]||this.casingBank['ar:concrete'];
+      const source=this.ctx.createBufferSource();source.buffer=bank[Math.floor(Math.random()*bank.length)];
+      source.connect(d);source.start();source.onended=()=>source.disconnect();return source;
     },
     dryClick() {
       const d = this.out(null, 0.6, { life: 0.2, reverb: 0.2 }); if (!d) return;
@@ -583,7 +607,13 @@
     playerVoice(type = 'hurt') {
       if (!this.ok) return;
       this.preparePlayerVoice();
-      const bank = this.playerVoiceBank && this.playerVoiceBank[type];
+      if(type==='death'){
+        if(this._playerVoiceSource){try{this._playerVoiceSource.stop();this._playerVoiceSource.disconnect();}catch(_){}this._playerVoiceSource=null;}
+        this._playerVoiceUntil=0;
+        if(Math.random()<.85)return;
+        this.makeVoiceBank();
+      }
+      const bank = type==='death'?this.lastBreathBank:this.playerVoiceBank && this.playerVoiceBank[type];
       if (!bank || !bank.length) return;
       const now = this.ctx.currentTime;
       // Damage from several bullets in one burst must not produce a chorus of voices.
@@ -593,13 +623,18 @@
       if (type === 'hurt' && bank.length > 1 && index === this._lastPlayerVoice) index = (index + 1) % bank.length;
       if (type === 'hurt') this._lastPlayerVoice = index;
       const buffer = bank[index];
-      const dest = this.out(null, type === 'death' ? 0.95 : 0.85, { life: buffer.duration + 0.1, reverb: 0.08, important: true });
+      const dest = this.out(null, type === 'death' ? 0.18 : 0.85, { life: buffer.duration + 0.1, reverb: type==='death'?.025:.08, important: true });
       if (!dest) return;
       const source = this.ctx.createBufferSource(); source.buffer = buffer;
       // Natural timing and pitch of the recording, with only a subtle room send.
-      source.connect(dest); source.start();
+      if(type==='death'){
+        const filter=this.ctx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=1100;filter.Q.value=.5;
+        source.playbackRate.value=.92;source.connect(filter);filter.connect(dest);source._deathFilter=filter;
+      }else source.connect(dest);
+      source.start();
       this._playerVoiceSource = source; this._playerVoiceUntil = now + buffer.duration;
-      source.onended = () => { source.disconnect(); if (this._playerVoiceSource === source) this._playerVoiceSource = null; };
+      source.onended = () => { source.disconnect();source._deathFilter?.disconnect(); if (this._playerVoiceSource === source) this._playerVoiceSource = null; };
+      return source;
     },
     hurt() {
       const d = this.out(null, 0.8, { life: 0.4, reverb: 0.1 }); if (!d) return;

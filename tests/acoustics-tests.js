@@ -45,5 +45,18 @@
     ally.wounds=[{rate:1,type:'limb'}];ally.die(null,false);ok('味方の失血死にも静かな絶命を適用',causes[1]==='bleed');
   } finally {A.deathVoice=originalDeath;}
   M.allyCount = 0; M.reset();
+  const rng=Math.random;
+  try{
+    Math.random=()=>.1;A._playerVoiceUntil=0;const hurt=A.playerVoice('hurt');A.playerVoice('death');
+    ok('プレイヤーの無言死亡は直前の悲鳴も停止する',!!hurt&&A._playerVoiceSource===null);
+    Math.random=()=>.9;const quiet=A.playerVoice('death');
+    ok('プレイヤーの有声死亡も長い悲鳴を使わない',!!quiet&&A.lastBreathBank.includes(quiet.buffer)&&quiet.buffer.duration<=.42&&quiet._deathFilter?.frequency.value===1100);
+    if(quiet)quiet.stop();
+    const gear=G.Humanoid.create({style:'swat',gear:'helmet-sunglasses'}).gear;
+    const shell=gear.getObjectByName('ballistic-shell'),rim=gear.getObjectByName('curved-rim');
+    shell.geometry.computeBoundingBox();
+    ok('SWATの頭装備は丸いシェル・曲線の縁・顔カバー',!!shell&&rim.geometry.type==='TubeGeometry'&&!!gear.getObjectByName('face-cover')&&shell.geometry.boundingBox.max.x<.125);
+    ok('ゴーグルを目ではなく額に装着',gear.children.filter(c=>c.name==='forehead-goggle-frame').length===1&&gear.getObjectByName('forehead-goggle-frame').position.y>.18);
+  }finally{Math.random=rng;}
   return R.join('\n');
 })()
