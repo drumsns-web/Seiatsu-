@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>制圧 SEIATSU v13 — タクティカルFPS試作</title>
+<title>制圧 SEIATSU v14 — タクティカルFPS試作</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -39,10 +39,10 @@
   <div id="reload-bar"><div id="reload-fill"></div><span>リロード中</span></div>
   <div id="allies"></div>
   <div id="squad-select" aria-label="移動指示の対象"><span>移動指示：Z　対象切替：Shift＋Z</span><div><button type="button" data-squad="both" aria-pressed="true">両方</button><button type="button" data-squad="alpha" aria-pressed="false">ALPHA</button><button type="button" data-squad="bravo" aria-pressed="false">BRAVO</button></div></div>
-  <div id="med"><div id="bleed"></div><div id="med-items"></div></div>
+  <div id="med"><div id="bleed"></div><div id="med-items"></div><div id="ally-aid-hint" role="status"></div></div>
   <div id="treatbar"><span></span><b><i></i></b></div>
   <div id="hp"><div class="row"><span id="hp-num">100</span><span class="unit">体力</span></div><div class="bar"><div id="hp-fill"></div></div><div id="posture">立ち</div></div>
-  <div id="ammo"><div id="weapon-slots"></div><div class="row"><span id="ammo-cur">30</span><span class="sep">/</span><span id="ammo-res">240</span></div><div class="weapon" id="weapon-name">AR-7 アサルトライフル</div></div>
+  <div id="ammo"><div id="weapon-slots"></div><div class="row"><span id="ammo-cur">30</span><span class="sep">/</span><span id="ammo-res">240</span></div><div class="weapon" id="weapon-name">M4A1 カービン</div></div>
   <div id="hint"></div>
   <div id="debug"><div id="debug-labels"></div><div id="dbg-fps"></div></div>
 </div>
@@ -71,6 +71,7 @@
   <div id="touch-extra" hidden>
     <button data-touch="leanL">左リーン</button><button data-touch="leanR">右リーン</button>
     <button data-touch="zoomOut">倍率 −</button><button data-touch="zoomIn">倍率 ＋</button>
+    <button data-touch="assist">仲間の救護</button>
     <button data-touch="suppressor">消音器</button>
     <button data-touch="command">追従／待機</button><button data-touch="moveOrder">照準へ移動</button>
   </div>
@@ -82,7 +83,7 @@
 <div id="menu">
   <div id="menu-main">
     <div class="stripe"></div>
-    <h1>制圧<span class="romaji">SEIATSU v13</span></h1>
+    <h1>制圧<span class="romaji">SEIATSU v14</span></h1>
     <p class="lede">敵が12人います。慎重に進み、全員を排除して開始地点の脱出地点へ戻ってください。</p>
     <label class="map-pick">作戦地域
       <select id="map-select"></select>
@@ -152,22 +153,23 @@
       <label><input type="radio" name="lo-allies" value="1"><b>ALPHA</b><small>1人同行</small></label>
       <label><input type="radio" name="lo-allies" value="2"><b>ALPHA ＋ BRAVO</b><small>2人同行</small></label>
     </div>
-    <h3 class="sub">AR-7 アサルトライフル</h3>
+    <h3 class="sub">M4A1 カービン</h3>
     <label class="field">照準器
       <select id="lo-optic"><option value="scope">長距離スコープ（2〜8倍。遠くの敵向き）</option><option value="dot">近距離ドットサイト（1.3倍。素早く狙える、周りが見える）</option></select>
     </label>
     <label class="field check"><input id="lo-arsup" type="checkbox"> サプレッサーを付ける</label>
-    <h3 class="sub">P-9 ハンドガン</h3>
+    <h3 class="sub">Glock 17 ハンドガン</h3>
     <label class="field check"><input id="lo-pistolsup" type="checkbox"> サプレッサーを付ける</label>
-    <h3 class="sub">S-12 ショットガン</h3>
+    <h3 class="sub">Remington 870 ショットガン</h3>
     <p class="small">付けられるものはありません。</p>
     <h3 class="sub">医療ポーチ</h3>
-    <p class="small">H キーで出血している傷から処置します。出血がないときは治療薬で体力を30回復できます。処置中は射撃できません。</p>
+    <p class="small">初期キー：H または 4 で自分を処置、5 で近くの仲間を救護。キー設定で変更できます。出血は止血を優先し、自分は治療薬で30、仲間は回復注射で60回復できます。処置中は射撃できません。</p>
     <div class="med-pick">
       <div><b>止血帯</b><small>手足の激しい出血を止める（3秒）</small><span class="stepper"><button data-med="tq" data-d="-1">−</button><em id="lo-tq">1</em><button data-med="tq" data-d="1">＋</button></span></div>
       <div><b>止血剤</b><small>胴体の激しい出血を止める（4秒）</small><span class="stepper"><button data-med="hemo" data-d="-1">−</button><em id="lo-hemo">1</em><button data-med="hemo" data-d="1">＋</button></span></div>
       <div><b>包帯</b><small>軽い出血を止める（2.5秒）。激しい出血には押さえるだけ</small><span class="stepper"><button data-med="band" data-d="-1">−</button><em id="lo-band">2</em><button data-med="band" data-d="1">＋</button></span></div>
       <div><b>治療薬</b><small>出血がないとき体力を30回復（1.8秒）</small><span class="stepper"><button data-med="medicine" data-d="-1">−</button><em id="lo-medicine">1</em><button data-med="medicine" data-d="1">＋</button></span></div>
+      <div><b>回復注射（仲間用）</b><small>生存中の仲間の体力を60回復（2秒）。止血は別途</small><span class="stepper"><button data-med="stim" data-d="-1">−</button><em id="lo-stim">0</em><button data-med="stim" data-d="1">＋</button></span></div>
       <p id="lo-med-room" class="small"></p>
     </div>
     <p class="small">サプレッサーを付けると、銃声がくぐもり、敵に聞こえる距離が約3割になり、発射炎もほとんど出なくなります。威力・命中は変わりません。</p>
@@ -282,5 +284,6 @@
 <script src="js/main.js"></script>
 </body>
 </html>
+
 
 
