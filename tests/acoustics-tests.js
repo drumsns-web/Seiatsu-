@@ -56,7 +56,7 @@
     const shell=gear.getObjectByName('ballistic-shell'),rim=gear.getObjectByName('curved-rim');
     shell.geometry.computeBoundingBox();
     ok('SWATの頭装備は丸いシェル・曲線の縁・顔カバー',!!shell&&rim.geometry.type==='TubeGeometry'&&!!gear.getObjectByName('face-cover')&&shell.geometry.boundingBox.max.x<.125);
-    ok('ゴーグルを目ではなく額に装着',gear.children.filter(c=>c.name==='forehead-goggle-frame').length===1&&gear.getObjectByName('forehead-goggle-frame').position.y>.18);
+    ok('ゴーグルが両目を覆う位置に装着される',gear.children.filter(c=>c.name==='eye-goggle-frame').length===1&&Math.abs(gear.getObjectByName('eye-goggle-frame').position.y-.119)<.001);
   }finally{Math.random=rng;}
   return R.join('\n');
 })()

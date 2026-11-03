@@ -11,7 +11,7 @@
   // ---- 持ち替え ----
   fresh(); place(12.5, 2.5, Math.PI);
   tap('Digit2'); Gm.step(40);
-  ok('2キーでハンドガンに持ち替え', P.cur === 'pistol' && VM.cur === 'pistol' && P.ammo === 15, P.cur + '/' + VM.cur);
+  ok('2キーでハンドガンに持ち替え', P.cur === 'pistol' && VM.cur === 'pistol' && P.ammo === 17, P.cur + '/' + VM.cur);
   tap('Digit3'); Gm.step(40);
   ok('3キーでショットガンに持ち替え', P.cur === 'shotgun' && VM.cur === 'shotgun' && P.ammo === 6);
   tap('Digit1'); Gm.step(40);
@@ -63,7 +63,7 @@
   P.ammo = 1; I.mouse.lmb = true; Gm.step(2); I.mouse.lmb = false; Gm.step(5);
   ok('弾切れでスライドが後退したまま止まる', VM.state.slideLock === true);
   tap('KeyR'); Gm.step(Math.ceil(1.9 * 60));
-  ok('ハンドガンのリロード（弾切れから）で15発・スライドが戻る', P.ammo === 15 && !P.reloading && VM.state.slideLock === false, P.ammo);
+  ok('ハンドガンのリロード（弾切れから）で17発・スライドが戻る', P.ammo === 17 && !P.reloading && VM.state.slideLock === false, P.ammo);
 
   // ---- ショットガン：散弾・ポンプ・1発ずつ装填 ----
   fresh();

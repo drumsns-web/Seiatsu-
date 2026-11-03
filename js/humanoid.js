@@ -188,7 +188,16 @@
     P('neck',2,new THREE.TorusGeometry(.066,.014,8,24),0,.025,0,Math.PI/2);
     P('head',7,sphere(.103,.92,1.12,1),0,.1,.008);
     P('head',7,rbox(.128,.08,.11,.035),0,.025,.037); // jaw
-    P('head',8,hemi(.104),0,.13,-.005); // close-cropped hair, uncovered face
+    P('head',10,hemi(.106),0,.13,-.005); // short hair, shared skinned geometry
+    // Tapered locks at the temples and nape remain visible below the helmet rim.
+    for (const side of [-1,1]) for(let j=0;j<4;j++) {
+      P('head',10,rbox(.022,.058 + j*.005,.028,.009),side*(.094-j*.003),.10-j*.003,-.018-j*.022,0,side*.12,side*.08);
+    }
+    for(let j=0;j<7;j++) {
+      const x=(j-3)*.023;
+      P('head',10,rbox(.026,.065,.025,.011),x,.061+.004*Math.sin(j*2),-.091-.018*(1-Math.abs(j-3)/4),-.15,0,-x*.6);
+    }
+    for(let j=0;j<7;j++)P('head',10,rbox(.026,.039,.024,.009),(j-3)*.024,.153+.005*Math.sin(j),.071-.008*Math.abs(j-3),0,0,-.2);
     for(const side of [-1,1]){
       P('head',7,sphere(.023,.5,1,.65),side*.096,.095,.005);
       P('head',4,rbox(.034,.006,.008,.002),side*.038,.119,.104);
@@ -236,7 +245,7 @@
     }
 
     // 結合
-    const byMat = Array.from({length:10},()=>[]);
+    const byMat = Array.from({length:11},()=>[]);
     for (const p of parts) byMat[p.mat].push(p);
     const pos = [], nor = [], uv = [], si = [], sw = [];
     const geo = new THREE.BufferGeometry();
@@ -365,16 +374,16 @@
     if(variant.includes('helmet')){
       const shell=add(HEAD_GEAR.helmet,M[3],0,0,0);shell.name='ballistic-shell';
       add(HEAD_GEAR.rim,M[4],0,0,0).name='curved-rim';
-      add(HEAD_GEAR.band,M[4],0,.191,.008);
-      add(HEAD_GEAR.goggleFrame,M[4],0,.198,.12).name='forehead-goggle-frame';
+      add(HEAD_GEAR.band,M[4],0,.119,.008);
+      add(HEAD_GEAR.goggleFrame,M[4],0,.119,.119).name='eye-goggle-frame';
       for(const side of [-1,1]){
-        const lens=add(HEAD_GEAR.goggleGlass,M[5],side*.052,.199,.139);lens.rotation.y=side*.10;
+        const lens=add(HEAD_GEAR.goggleGlass,M[5],side*.052,.12,.138);lens.rotation.y=side*.10;
         const strap=add(HEAD_GEAR.strap,M[4],side*.075,.028,.033);strap.rotation.z=-side*.48;
       }
       add(HEAD_GEAR.chin,M[4],0,-.02,.055);
       if(style==='swat'){add(HEAD_GEAR.mask,M[2],0,0,.024).name='face-cover';}
     }
-    if(variant.includes('sunglasses')&&!(style==='swat'&&variant.includes('helmet'))){
+    if(variant.includes('sunglasses')&&!variant.includes('helmet')){
       for(const side of [-1,1]){add(HEAD_GEAR.frame,M[4],side*.047,.115,.109);add(HEAD_GEAR.lens,M[5],side*.047,.115,.121);add(HEAD_GEAR.temple,M[4],side*.092,.127,.061);}
       add(HEAD_GEAR.bridge,M[4],0,.12,.119);
     }
@@ -412,12 +421,29 @@
     if (handWorldQuat) { hd.quaternion.copy(_qb).invert().multiply(handWorldQuat); hd.updateMatrixWorld(true); }
   }
 
+  // Hair palettes and strand texture are shared; changing one actor never recolors others.
+  const HAIR_COLORS=[0x201c19,0x573b29,0xc9a15d,0x423025], HAIR_SETS=new WeakMap();
+  let hairSerial=0, hairMap=null;
+  function hairMaterials(base,variant){
+    let sets=HAIR_SETS.get(base);
+    if(!sets){
+      if(!hairMap){const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');
+        x.fillStyle='#d0d0d0';x.fillRect(0,0,64,64);
+        for(let i=0;i<64;i+=2){x.strokeStyle=i%6?'#b4b4b4':'#f0f0f0';x.beginPath();x.moveTo(i,0);x.lineTo(i-3,64);x.stroke();}
+        hairMap=new THREE.CanvasTexture(c);hairMap.wrapS=hairMap.wrapT=THREE.RepeatWrapping;hairMap.encoding=THREE.sRGBEncoding;
+      }
+      sets=HAIR_COLORS.map(color=>{const materials=base.slice();materials[10]=new THREE.MeshStandardMaterial({color:new THREE.Color(color).convertSRGBToLinear(),map:hairMap,roughness:.92,skinning:true});return materials;});
+      HAIR_SETS.set(base,sets);
+    }
+    return sets[variant];
+  }
   // ---------- 生成 ----------
   G.Humanoid = {
     TEAM_COLORS, rigidMaterials,
     create(opts) {
       opts = opts || {};
-      const M = matsFor(opts.style || 'enemy', opts.team || 'red');
+      const hairVariant = Number.isInteger(opts.hairVariant) ? ((opts.hairVariant % 4) + 4) % 4 : hairSerial++ % 4;
+      const M = hairMaterials(matsFor(opts.style || 'enemy', opts.team || 'red'),hairVariant);
       const bones = {}, list = [], boneIndex = {}, parentOf = {};
       for (const [name, parent, x, y, z] of BONES) {
         const b = new THREE.Bone(); b.name = name; b.position.set(x, y, z);
@@ -449,7 +475,7 @@
       flash.scale.set(0.45, 0.45, 1); flash.visible = false; muzzle.add(flash);
 
       const h = {
-        gear, cutGeometry:G.SeverGeometry.prepare(geo,list), root, fall, mesh, bones, gun, gunPivot, gripR, gripL, magPt, muzzle, flash,
+        gear, hairVariant, cutGeometry:G.SeverGeometry.prepare(geo,list), root, fall, mesh, bones, gun, gunPivot, gripR, gripL, magPt, muzzle, flash,
         headWorld: V3(0, 1.66, 0), hipsWorld: V3(0, 0.98, 0),
         // アニメーションの内部状態（すべてなめらかに追従させる）
         st: {

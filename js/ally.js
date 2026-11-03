@@ -28,7 +28,7 @@
       this.moveGoal = null; this.moveState = 'none';
       this.crouch = 0; this.wantCrouch = false; this.prone = false;
       this.posture = 'stand'; this.sprinting = false; this.moving = false; this.lastShotT = -99;
-      this.wounds = []; this.med = { tq: 1, hemo: 1, band: 2 }; this.treat = null; this.legHits = 0; this.crippled = false;
+      this.wounds = []; this.med = { tq: 1, hemo: 1, band: 2, medicine: 2 }; this.treat = null; this.legHits = 0; this.crippled = false;
       this.legLost = null; this.armLost = null; this.headLost = false; this.hurtT = -99; this.threat = null;
       this.sideStep = 0; this.sideT = 0; this.speed = 0; this.stepDist = 0; this.voiceT = 0;
       this.syncModel(1 / 60);
@@ -113,12 +113,20 @@
         if (!w.packed && med[want] > 0) return { w, item: want, full: true };
         if (w.type !== 'light' && !w.packed && med.band > 0) return { w, item: 'band', full: false };
       }
+      if(this.hp<=70&&med.medicine>0)return {item:'medicine',full:true};
       return null;
     }
     applyTreat(T, med) {
+      if(this.dead||!(med[T.item]>0))return false;
+      if(T.item==='medicine'||T.item==='stim'){
+        if(this.hp>=100)return false;
+        med[T.item]--;this.hp=Math.min(100,this.hp+(T.item==='stim'?60:30));return true;
+      }
+      if(!T.w||!this.wounds.includes(T.w)||T.w.rate<=0||T.w.packed)return false;
       med[T.item] = Math.max(0, med[T.item] - 1);
       if (T.full) this.wounds = this.wounds.filter(x => x !== T.w);
       else { T.w.packed = true; T.w.rate *= T.w.type === 'torso' ? 0.5 : 0.4; }
+      return true;
     }
 
     // ---- 移動 ----
@@ -219,7 +227,7 @@
 
     // ---- 射撃（命中は確率、外れ弾は実際に飛ぶ：プレイヤーに当たることもある） ----
     tryFire(dt) {
-      const e = this.target; if (!e || this.reloadT > 0 || this.treat) return;
+      const e = this.target; if (!e || this.reloadT > 0 || this.treat || G.Player.treat?.ally===this) return;
       this.fireCD -= dt; this.reaction -= dt;
       if (this.fireCD > 0 || this.reaction > 0) return;
       if (this.ammo <= 0) { this.startReload(); return; }
@@ -293,16 +301,22 @@
       this.percT -= dt; if (this.percT <= 0) { this.percT = 0.15; this.perceive(); }
       this.speed = 0;
       const combat = !!this.target;
-      // 自分で処置：敵が見えていない時だけ
+      const assisted=P.treat?.ally===this;
+      const need=this.pickTreat(this.med);
+      let exposed=false;
+      if(combat){const from=this.target.eyePos(),to=this.eyePos();exposed=G.World.lineOfSight(from.x,from.y,from.z,to.x,to.y,to.z);}
+      // Wounded allies seek cover, then stop bleeding before recovering health.
+      if(!assisted&&need&&exposed&&!this.crippled&&!this.coverGoal){const cover=this.findCover(this.target.pos,6);if(cover){this.coverGoal=cover;this.goTo(cover);}}
       if (this.treat) {
         this.treat.t += dt;
-        if (combat || this.target) { this.treat = null; }
-        else if (this.treat.t >= G.MED[this.treat.item].time) { this.applyTreat(this.treat, this.med); this.treat = null; G.Audio.treat && G.Audio.treat('end', 'band'); }
-      } else if (br > 0 && !combat && G.time - this.seenT > 1.5 && G.time - this.hurtT > 1) {
-        const T = this.pickTreat(this.med);
-        if (T) { this.treat = { ...T, t: 0 }; this.goal = null; }
+        if (exposed || assisted) { this.treat = null; }
+        else if (this.treat.t >= G.MED[this.treat.item].time) { const item=this.treat.item;this.applyTreat(this.treat, this.med); this.treat = null; G.Audio.treat && G.Audio.treat('end', item); }
+      } else if (need && !assisted && !exposed && G.time - this.hurtT > 1.2) {
+        this.treat = { ...need, t: 0 }; this.goal = null;this.path=null;this.reloadT=0;
       }
-      if (combat) {
+      if(this.treat||assisted){
+        this.goal=null;this.path=null;this.wantCrouch=!this.crippled;
+      }else if (combat) {
         const e = this.target, ep = V3(); e.body.bones.chest.getWorldPosition(ep);
         this.aimAt(ep, dt, 5);
         // 慎重に：撃たれていて身をさらしているなら近くの遮蔽物へ。そうでなければその場で（しゃがんで）撃つ
@@ -370,7 +384,7 @@
       b.root.position.set(this.pos.x, 0, this.pos.z); b.root.rotation.y = this.bodyYaw;
       b.update({
         dt: Math.max(dt, 1e-4), speed: this.dead ? 0 : this.speed, crouch: this.crouch,
-        aim: this.target ? 1 : 0.5, aimPitch: this.lookPitch, twist: angDiff(this.bodyYaw, this.lookYaw),
+        aim: this.treat||G.Player.treat?.ally===this ? 0 : this.target ? 1 : 0.5, aimPitch: this.lookPitch, twist: angDiff(this.bodyYaw, this.lookYaw),
         reload: this.reloadT > 0 ? 1 - this.reloadT / (this.armLost ? 4 : 2.4) : -1, scene: G.Game.scene,
         lean: 0, prone: this.crippled || this.prone, hunch: this.hp < 40 ? 0.6 : 0, limp: this.legHits ? 0.7 : 0, limpSide: 1,
       });
@@ -500,9 +514,14 @@
       return true;
     },
     // プレイヤーの近くで出血している仲間（処置の対象）
-    nearbyWounded(P) {
+    canAssist(P,a,range=1.8){
+      if(!a||a.dead||P.dead||a.pos.distanceTo(P.pos)>range)return false;
+      const py=P.posture==='prone'?.3:.8,ay=a.crippled?.3:.8;
+      return G.World.lineOfSight(P.pos.x,P.pos.y+py,P.pos.z,a.pos.x,a.pos.y+ay,a.pos.z);
+    },
+    nearbyWounded(P,health=false) {
       let best = null, bd = 1.8;
-      for (const a of this.list) { if (a.dead || !a.bleedRate()) continue; const d = a.pos.distanceTo(P.pos); if (d < bd) { bd = d; best = a; } }
+      for (const a of this.list) { if (!this.canAssist(P,a)||!(health?(a.hp<100||a.bleedRate()>0):a.bleedRate()>0)) continue; const d = a.pos.distanceTo(P.pos); if (d < bd) { bd = d; best = a; } }
       return best;
     },
     update(dt, P) { for (const a of this.list) a.update(dt, P); },

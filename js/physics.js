@@ -68,6 +68,7 @@
     world: null, cells: new Map(), ragdolls: [], debris: [], pieces: [], accumulator: 0, MAX_ACTIVE_RAGDOLLS: 6,
     init(scene) {
       this.scene = scene;
+      this.prepareHeadWounds();
       this.world = new C.World({ gravity: V(0, -9.82, 0), allowSleep: true });
       // 動かない壁が多いので、衝突の記録は必要な組だけを持つ形にする
       this.world.collisionMatrix = new C.ObjectCollisionMatrix();
@@ -207,38 +208,46 @@
       if (hit.part === 'legs') return 'leg' + s;
       return null;
     },
+    prepareHeadWounds() {
+      if(this.headWoundGeos)return;
+      this.headWoundMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.28,metalness:0,side:THREE.DoubleSide});
+      this.headWoundGeos=Array.from({length:6},(_,variant)=>{
+        const pos=[],colors=[],n=22;
+        const center=new THREE.Color(0x880906).convertSRGBToLinear(),inner=new THREE.Color(0xba100c).convertSRGBToLinear(),outer=new THREE.Color(0xe02518).convertSRGBToLinear();
+        const put=(x,y,z,c)=>{pos.push(x,y,z);colors.push(c.r,c.g,c.b);};
+        const edge=j=>{const a=(j%n)*2*Math.PI/n,r=.095+.005*Math.sin(j*5.7+variant);const x=Math.cos(a)*r,z=Math.sin(a)*r+.008;return [x,G.SeverGeometry.headCutHeight(x,z,variant)+.004,z];};
+        for(let i=0;i<n;i++){
+          const [ax,ay,az]=edge(i),[bx,by,bz]=edge(i+1);
+          put(0,.047,.008,center);put(ax*.68,.06,az*.68,inner);put(bx*.68,.06,bz*.68,inner);
+          put(ax*.68,.06,az*.68,inner);put(ax,ay,az,outer);put(bx,by,bz,outer);
+          put(ax*.68,.06,az*.68,inner);put(bx,by,bz,outer);put(bx*.68,.06,bz*.68,inner);
+          // Thin irregular wet runs follow the remaining lower face, without new rigid bodies.
+          if(i%3===variant%3){const x=(ax+bx)/2,z=(az+bz)/2,y=(ay+by)/2;
+            put(ax,ay,az,outer);put(bx,by,bz,inner);put(x*.91,y-.025-.009*((i+variant)%4),z*1.06,inner);
+          }
+        }
+        const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.computeVertexNormals();return geo;
+      });
+    },
     burstHead(h, hit) {
       if (h.missing?.has('head')) return null;
       h.root.updateMatrixWorld(true);
       h.missing = h.missing || new Set(); h.missing.add('head');
       h.severedKeys = [...(h.severedKeys || []), 'head'];
+      let variant=Math.floor(Math.random()*6);if(variant===this.lastHeadVariant)variant=(variant+1+Math.floor(Math.random()*5))%6;
+      this.lastHeadVariant=h.headWoundVariant=variant;
       h.mesh.geometry = G.SeverGeometry.remaining(h, h.severedKeys);
       if (h.gear) h.gear.visible = false;
       // 顎と口元は残し、目と鼻より上の不規則な断面を頭の骨に追従させる。
-      if (!this.headWoundGeo) {
-        const pos=[], colors=[], n=18;
-        const center=new THREE.Color(0x260505), inner=new THREE.Color(0x6b0808), outer=new THREE.Color(0xa4120e);
-        const put=(x,y,z,c)=>{pos.push(x,y,z);colors.push(c.r,c.g,c.b);};
-        for(let i=0;i<n;i++){
-          const a=i*2*Math.PI/n,b=(i+1)*2*Math.PI/n;
-          const edge=(angle,j)=>{const x=Math.cos(angle)*(.092+.006*Math.sin(j*5.7)),z=Math.sin(angle)*(.095+.005*Math.cos(j*3.1))+.008;return [x,.078+.019*Math.sin(x*49)+.011*Math.cos(z*57)+.006*x/.1,z];};
-          const [ax,ay,az]=edge(a,i),[bx,by,bz]=edge(b,i+1);
-          put(0,.052,.008,center);put(ax*.68,.065,az*.68,inner);put(bx*.68,.065,bz*.68,inner);
-          put(ax*.68,.065,az*.68,inner);put(ax,ay,az,outer);put(bx,by,bz,outer);
-          put(ax*.68,.065,az*.68,inner);put(bx,by,bz,outer);put(bx*.68,.065,bz*.68,inner);
-        }
-        const geo=this.headWoundGeo=new THREE.BufferGeometry();
-        geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
-        geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.computeVertexNormals();
-        this.headWoundMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide});
-      }
-      const wound=new THREE.Mesh(this.headWoundGeo,this.headWoundMat);
+      const wound=new THREE.Mesh(this.headWoundGeos[variant],this.headWoundMat);
+      wound.visible=G.Game.gore!=='off';
       wound.name='torn-upper-face';wound.castShadow=true;h.bones.head.add(wound);h.headWound=wound;
       const point=h.bones.head.localToWorld(new THREE.Vector3(0,.145,.008));
       const body=new C.Body({mass:.3,shape:new C.Sphere(.045),position:V(point.x,point.y,point.z),collisionFilterGroup:4,collisionFilterMask:1,linearDamping:.8,angularDamping:.95,allowSleep:true,sleepSpeedLimit:.08,sleepTimeLimit:.2});
       const d=hit.dir||new THREE.Vector3();
       body.velocity.set(d.x*.35,-.5,d.z*.35);
-      const mesh=new THREE.Mesh(new THREE.DodecahedronGeometry(.052,1),new THREE.MeshStandardMaterial({color:0xb50b09,roughness:.9}));
+      const mesh=new THREE.Mesh(new THREE.DodecahedronGeometry(.052,1),new THREE.MeshStandardMaterial({color:0xc81710,roughness:.3}));
+      mesh.scale.set(.9+Math.random()*.2,.7+Math.random()*.25,.9+Math.random()*.2);mesh.visible=G.Game.gore!=='off';
       mesh.position.copy(body.position);mesh.castShadow=true;this.scene.add(mesh);this.world.addBody(body);
       const piece={h,key:'head',kind:'headMass',body,mesh,age:0,landed:false,frozen:false,sleptT:0};
       body.addEventListener('collide',()=>{
@@ -412,6 +421,7 @@
     },
     update(dt) {
       if (!this.world) return;
+      for(const p of this.pieces)if(p.kind==='headMass'){p.mesh.visible=G.Game.gore!=='off';if(p.h.headWound)p.h.headWound.visible=G.Game.gore!=='off';}
       const busy = this.ragdolls.some(r => !r.frozen) || this.debris.length || this.pieces.some(p => !p.frozen);
       if (!busy) { this.accumulator = 0; return; }
       this.accumulator += Math.min(.05, dt); let steps = 0;

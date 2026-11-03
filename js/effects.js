@@ -216,7 +216,7 @@
     stumpBurst(h, boneName, dir) {
       if (G.Game.gore === 'off') return;
       this.spurts = this.spurts || [];
-      this.spurts.push({ h, bone: boneName, t: 0, dur: G.Game.gore === 'low' ? 0.8 : 1.8, dir: (dir || new THREE.Vector3()).clone(), acc: 0 });
+      this.spurts.push({ h, bone: boneName, t: 0, dur: G.Game.gore === 'low' ? 0.8 : boneName === 'head' ? 2.6 : 1.8, dir: (dir || new THREE.Vector3()).clone(), acc: 0 });
       const p = new THREE.Vector3(); (h.bones[boneName] || h.bones.chest).getWorldPosition(p);
       this.bloodHit(p, (dir || new THREE.Vector3(0, 0, 1)).clone().normalize(), true);
     },
@@ -338,8 +338,14 @@
       // 切り口からの出血
       if (this.spurts) for (let i = this.spurts.length - 1; i >= 0; i--) {
         const s = this.spurts[i]; s.t += dt; s.acc += dt;
-        if (s.t > s.dur || !s.h.bones[s.bone]) { this.spurts.splice(i, 1); continue; }
+        if (G.Game.gore === 'off' || s.t > s.dur || !s.h.bones[s.bone]) { this.spurts.splice(i, 1); continue; }
         const k = 1 - s.t / s.dur, p = new THREE.Vector3(); s.h.bones[s.bone].getWorldPosition(p);
+        if(s.bone==='head') {
+          s.h.bones.head.localToWorld(p.set(0,.045,.07));
+          const interval=G.Game.gore==='low'?.22:.12;
+          if(s.acc>=interval){s.acc=0;this.spawn(p,new THREE.Vector3((Math.random()-.5)*.09,-.18,(Math.random()-.5)*.09),0xb71910,.7,.018+.008*k,0,false,9.8);}
+          continue;
+        }
         while (s.acc > 0.04) {
           s.acc -= 0.04;
           const v = s.dir.clone().multiplyScalar(0.6 * k).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.6 + Math.random() * 0.8 * k, (Math.random() - 0.5) * 0.8));

@@ -168,11 +168,13 @@
     P.pos.set(10.5, 0, 2.5); P.update(.001, [], { dx: 0, dy: 0, wheel: 0 }); en.tgtT = 0; en.tgt = null; en.visible = false;
     const tg = en.pickTarget(P);
     ok('敵は見えている仲間を狙う（自分が見えないとき）', tg === a0 || tg === A.list[1], tg === P ? 'プレイヤー' : tg && tg.name);
-    // 仲間は撃たれれば出血し、そばでHを押すと自分の医療品で処置できる
-    const a1 = A.list[1]; a1.pos.set(P.pos.x + 1, 0, P.pos.z); a1.wounds = [{ type: 'limb', area: 'leg', rate: 1.5, packed: false }]; a1.seenT = G.time; a1.hurtT = G.time;
+    // 仲間は撃たれれば出血し、そばで5を押すと自分の医療品で処置できる
+    // Rescue requires a clear line of sight; use two open corridor cells.
+    P.pos.set(12.5,0,2.5);P.camInit=false;
+    const a1 = A.list[1]; a1.pos.set(12.5, 0, 3.5); a1.wounds = [{ type: 'limb', area: 'leg', rate: 1.5, packed: false }]; a1.seenT = G.time; a1.hurtT = G.time;
     P.med = { tq: 1, hemo: 0, band: 0 };
-    tap('KeyH'); const who = P.treat && P.treat.ally; M.step(200);
-    ok('仲間のそばでHを押すと仲間を処置する', who === a1 && a1.bleedRate() === 0 && P.med.tq === 0);
+    tap('Digit5'); const who = P.treat && P.treat.ally; M.step(200);
+    ok('仲間のそばで5を押すと仲間を処置する', who === a1 && a1.bleedRate() === 0 && P.med.tq === 0);
     // 自分の弾は仲間に当たる（誤射）
     a1.pos.set(P.pos.x, 0, P.pos.z + 3); a1.syncModel(1 / 60); a1.syncModel(1 / 60); const hpA = a1.hp;
     P.yaw = Math.PI; P.pitch = -0.05; P.camInit = false; P.update(.001, [], { dx: 0, dy: 0, wheel: 0 }); P.shoot();

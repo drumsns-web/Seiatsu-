@@ -10,12 +10,17 @@
  const KEYS={head:['head'],foreL:['foreL'],foreR:['foreR'],armL:['uaL','foreL'],armR:['uaR','foreR'],legL:['thL','shinL'],legR:['thR','shinR']};
  G.SeverGeometry={
   KEYS,
+  headCutHeight(x,z,variant=0){
+   const phase=variant*.91;
+   return .072+.019*Math.sin(x*(49+variant*3)+phase)+.011*Math.cos(z*(57-variant*2)-phase)+.006*x/.1+Math.sin(variant*2)*.006;
+  },
   prepare(geo,bones){
    if(cache.has(geo))return cache.get(geo);
    const si=geo.attributes.skinIndex,sw=geo.attributes.skinWeight,idx=si.clone(),weights=sw.clone(),byRegion=Object.fromEntries(GROUPS.map(k=>[k,[]]));
    const names=bones.map(b=>region(b.name));
    const indexOf=Object.fromEntries(GROUPS.map(g=>[g,bones.findIndex(b=>region(b.name)===g)]));
    const headBone=bones.find(b=>b.name==='head');
+   const headCuts=Array.from({length:6},()=>[]);
    const cutY=headBone ? headBone.getWorldPosition(new THREE.Vector3()).y+.072 : 1.712;
    const py=geo.attributes.position;
    for(let i=0;i<si.count;i+=3){
@@ -26,7 +31,8 @@
     const centerY=(py.getY(i)+py.getY(i+1)+py.getY(i+2))/3;
     const centerX=(py.getX(i)+py.getX(i+1)+py.getX(i+2))/3;
     const centerZ=(py.getZ(i)+py.getZ(i+1)+py.getZ(i+2))/3;
-    const tornY=cutY+.019*Math.sin(centerX*49)+.011*Math.cos(centerZ*57)+.006*centerX/.1;
+    const tornY=cutY-.072+this.headCutHeight(centerX,centerZ,0);
+    if(owner==='head')for(let v=0;v<6;v++)if(centerY>=cutY-.072+this.headCutHeight(centerX,centerZ,v))headCuts[v].push(i,i+1,i+2);
     const cutOwner=owner==='head' && centerY<tornY?'core':owner;
     byRegion[cutOwner].push(i,i+1,i+2);
     // 三角形が属する部位以外の骨の影響を外す（外れた後に、残った体の形が引っ張られないように）
@@ -36,7 +42,7 @@
      else {idx.setXYZW(v,Math.max(0,indexOf[owner]),0,0,0);weights.setXYZW(v,1,0,0,0);}
     }
    }
-   const result={byRegion,source:geo,skinIndex:idx,skinWeight:weights,remainingCache:new Map()};
+   const result={headCuts,byRegion,source:geo,skinIndex:idx,skinWeight:weights,remainingCache:new Map()};
    for(const key in KEYS){
     const cut=[].concat(...KEYS[key].map(g=>byRegion[g])),removed=new Set(cut);
     const partGroups=[];let offset=0;for(const g of geo.groups){let count=0;for(let i=g.start;i<g.start+g.count;i++)if(removed.has(i))count++;if(count)partGroups.push({start:offset,count,materialIndex:g.materialIndex});offset+=count;}
@@ -45,13 +51,14 @@
    cache.set(geo,result);
    // よく使う「1か所だけ外れた形」は先に作っておく（命中した瞬間に重い処理をしない）
    for(const key in KEYS)G.SeverGeometry.remaining({cutGeometry:result},[key]);
+   for(let v=1;v<6;v++)G.SeverGeometry.remaining({cutGeometry:result,headWoundVariant:v},["head"]);
    return result;
   },
   // いくつかの部位が外れた後の、残りの体の形（同じ組み合わせは作り直さない）
   remaining(h,keys){
-   const c=h.cutGeometry,id=[...new Set(keys)].sort().join('+');
+   const c=h.cutGeometry,variant=h.headWoundVariant||0,id=[...new Set(keys)].sort().join('+')+(keys.includes('head')?'@'+variant:'');
    if(c.remainingCache.has(id))return c.remainingCache.get(id);
-   const geo=c.source,removed=new Set();for(const k of keys)for(const i of c[k].indices)removed.add(i);
+   const geo=c.source,removed=new Set();for(const k of keys)for(const i of k==='head'?c.headCuts[variant]:c[k].indices)removed.add(i);
    const out=new THREE.BufferGeometry();
    for(const [name,attr]of Object.entries(geo.attributes))out.setAttribute(name,name==='skinIndex'?c.skinIndex:name==='skinWeight'?c.skinWeight:attr);
    const keep=[];for(let i=0;i<geo.attributes.position.count;i++)if(!removed.has(i))keep.push(i);

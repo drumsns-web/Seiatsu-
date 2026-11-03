@@ -8,13 +8,13 @@
 
   // 武器の性能（調整はここ）
   const WEAPONS = G.WEAPONS = {
-    ar: { id: 'ar', name: 'AR-7 アサルトライフル', short: 'ライフル', mag: 30, reserve: 240, maxReserve: 330, interval: 60 / 650, auto: true,
+    ar: { id: 'ar', name: 'M4A1 カービン', short: 'ライフル', mag: 30, reserve: 240, maxReserve: 330, interval: 60 / 650, auto: true,
       dmg: { head: 120, body: 34, stomach: 30, legs: 24, arms: 20 }, range: 150, pellets: 1,
       spreadHip: 0.014, spreadMove: 0.02, spreadAds: 0.0006, kick: 0.0125, kickYaw: 0.0055, adsZoom: 0, noise: 45, pen: 0.65 },
-    pistol: { id: 'pistol', name: 'P-9 ハンドガン', short: '拳銃', mag: 15, reserve: 60, maxReserve: 90, interval: 0.13, auto: false,
+    pistol: { id: 'pistol', name: 'Glock 17 ハンドガン', short: '拳銃', mag: 17, reserve: 60, maxReserve: 90, interval: 0.13, auto: false,
       dmg: { head: 95, body: 30, stomach: 26, legs: 20, arms: 18 }, range: 80, pellets: 1,
       spreadHip: 0.012, spreadMove: 0.018, spreadAds: 0.0025, kick: 0.024, kickYaw: 0.009, adsZoom: 1.3, noise: 35, pen: 0.45 },
-    shotgun: { id: 'shotgun', name: 'S-12 ショットガン', short: '散弾銃', mag: 6, reserve: 30, maxReserve: 42, interval: 0.12, auto: false,
+    shotgun: { id: 'shotgun', name: 'Remington 870 ショットガン', short: '散弾銃', mag: 6, reserve: 30, maxReserve: 42, interval: 0.12, auto: false,
       dmg: { head: 34, body: 16, stomach: 14, legs: 11, arms: 10 }, range: 60, pellets: 9,
       spreadHip: 0.06, spreadMove: 0.015, spreadAds: 0.045, kick: 0.05, kickYaw: 0.012, adsZoom: 1.25, noise: 55, falloff: [8, 25, 0.3], pen: 0.25 },
   };
@@ -33,6 +33,7 @@
     hemo: { name: '止血剤', time: 4.0, cost: 1 },
     band: { name: '包帯', time: 2.5, cost: 1 },
     medicine: { name: '治療薬', time: 1.8, cost: 1 },
+    stim: { name: '回復注射', time: 2, cost: 1 },
   };
   const MED_CAPACITY = 6;   // 医療ポーチに入る数
   G.BLEED = BLEED; G.MED = MED; G.MED_CAPACITY = MED_CAPACITY;
@@ -68,8 +69,8 @@
       this.reloading = false; this.fireWhenLoaded = false; this.knifeT = -1; this.knifeCD = 0; this.knifeHitDone = true;
       this.stepAcc = 0; this.dead = false; this.hurtT = 0;
       // 出血と医療品（出撃時の装備から）
-      const lm = (G.Game.loadout && G.Game.loadout.med) || { tq: 1, hemo: 1, band: 2, medicine: 1 };
-      this.med = { tq: lm.tq | 0, hemo: lm.hemo | 0, band: lm.band | 0, medicine: lm.medicine | 0 };
+      const lm = (G.Game.loadout && G.Game.loadout.med) || { tq: 1, hemo: 1, band: 2, medicine: 1, stim: 0 };
+      this.med = { tq: lm.tq | 0, hemo: lm.hemo | 0, band: lm.band | 0, medicine: lm.medicine | 0, stim: lm.stim | 0 };
       this.wounds = []; this.treat = null; this.dripT = 0; this.bleedDeath = false;
       this.legHits = 0; this.crippled = false; this.legLost = null; this.headLost = false; this.armLost = null; this.swayT = Math.random() * 100;
       if (G.Viewmodel.setOneArm) G.Viewmodel.setOneArm(false);
@@ -193,16 +194,6 @@
     startTreat() {
       if (this.dead || this.treat) { if (this.treat) { this.treat = null; G.Viewmodel.state.lowered = false; HUD.msg('処置を中断'); } return; }
       const todo = this.wounds.filter(w => w.rate > 0).sort((a, b) => b.rate - a.rate);
-      const mate = G.Allies.nearbyWounded(this), selfHeavy = todo.some(w => w.type !== 'light' && !w.packed);
-      if (mate && (!selfHeavy || !todo.length)) {
-        const T = mate.pickTreat(this.med);
-        if (!T) { HUD.msg('仲間に使える医療品がありません'); return; }
-        if (this.reloading) { this.reloading = false; G.Viewmodel.cancelReload(); }
-        this.treat = { ...T, t: 0, dur: MED[T.item].time, ally: mate };
-        mate.treat = null;
-        G.Viewmodel.state.lowered = true; G.Audio.treat && G.Audio.treat('start', T.item);
-        HUD.msg(mate.name + 'を' + (T.full ? MED[T.item].name : '包帯（代用）') + 'で処置中…'); return;
-      }
       if (!todo.length) {
         if (this.hp >= 100 || !this.med.medicine) { HUD.msg(this.hp < 100 ? '治療薬がありません' : '処置は不要です'); return; }
         if (this.reloading) { this.reloading = false; G.Viewmodel.cancelReload(); }
@@ -226,11 +217,28 @@
       G.Audio.treat && G.Audio.treat('start', pick.item);
       HUD.msg((pick.full ? MED[pick.item].name : '包帯（代用）') + 'で処置中…');
     },
+    startAssist() {
+      if(this.dead)return;
+      if(this.treat){this.treat=null;G.Viewmodel.state.lowered=false;HUD.msg('処置を中断');return;}
+      const mate=G.Allies.nearbyWounded(this,true);
+      if(!mate){HUD.msg('負傷した仲間の近く（1.8m以内）で使用');return;}
+      if(this.switchT>0||this.knifeT>=0||G.Viewmodel.state.gThrowT>=0){HUD.msg('動作が終わってから救護してください');return;}
+      const wound=mate.pickTreat({...this.med,medicine:0});
+      const plan=wound||(mate.hp<100&&this.med.stim>0?{item:'stim',full:true}:null);
+      if(!plan){HUD.msg('使える医療品がありません。出撃前の装備で携行できます');return;}
+      this.reloading=false;G.Viewmodel.cancelReload();this.gHold=false;G.Viewmodel.grenadeHold(false);G.Grenades.preview(null);
+      this.sprinting=false;this.ads=false;mate.treat=null;
+      this.treat={...plan,t:0,dur:MED[plan.item].time,ally:mate,targetHurtT:mate.hurtT};
+      G.Viewmodel.state.lowered=true;G.Audio.treat('start',plan.item);HUD.msg(mate.name+'：'+MED[plan.item].name+'で処置中');
+    },
     finishTreat() {
       const T = this.treat; this.treat = null; G.Viewmodel.state.lowered = false;
       if (T.ally) {
         if (T.ally.dead) { HUD.msg(T.ally.name + 'は助からなかった'); return; }
-        T.ally.applyTreat(T, this.med); HUD.msg(T.ally.name + 'の' + G.BLEED[T.w.type].name + 'を' + (T.full ? '止めた' : '押さえた')); G.Audio.treat && G.Audio.treat('end', T.item); HUD.medical(); return;
+        if(!G.Allies.canAssist(this,T.ally,2.3)||T.ally.hurtT>T.targetHurtT){HUD.msg('救護を中断');return;}
+        if(!T.ally.applyTreat(T,this.med)){HUD.msg('処置できませんでした');return;}
+        HUD.msg(T.ally.name+(T.item==='stim'?'の体力を60回復':T.item==='medicine'?'の体力を30回復':'の'+G.BLEED[T.w.type].name+'を'+(T.full?'止めた':'押さえた')));
+        G.Audio.treat && G.Audio.treat('end', T.item); HUD.medical(); return;
       }
       if (T.item === 'medicine') {
         this.med.medicine = Math.max(0, this.med.medicine - 1);
@@ -264,7 +272,8 @@
       const I = G.Input;
       // ---- 切り替え操作（押した瞬間だけ） ----
       for (const a of edges) {
-        if (a === 'treat') { this.startTreat(); continue; }
+        if (a === 'treat' || a === 'treatAlt') { this.startTreat(); continue; }
+        if (a === 'assist') { this.startAssist(); continue; }
         if (a === 'command') { G.Allies.toggleMode(); continue; }
         if (a === 'moveOrder') { G.Allies.orderAtReticle(); continue; }
         if (a === 'jump') {
@@ -331,7 +340,7 @@
       }
       if (this.treat) {
         // 仲間の処置中に離れたら中断
-        if (this.treat.ally && (this.treat.ally.dead || this.treat.ally.pos.distanceTo(this.pos) > 2.3)) { this.treat = null; G.Viewmodel.state.lowered = false; HUD.msg('仲間から離れたので処置を中断'); }
+        if (this.treat.ally && (!G.Allies.canAssist(this,this.treat.ally,2.3)||this.treat.ally.hurtT>this.treat.targetHurtT)) { this.treat = null; G.Viewmodel.state.lowered = false; HUD.msg('距離・遮蔽物・仲間の被弾により処置を中断'); }
         else { this.treat.t += dt; if (this.treat.t >= this.treat.dur) this.finishTreat(); }
       }
       this.ads = adsBtn && !this.reloading && !this.sprinting && this.knifeT < 0 && !this.dead && !busy;
@@ -810,11 +819,11 @@
           HUD.msg('弾薬を拾った　' + got.join('　')); HUD.ammo(); HUD.weapons();
         } else {
           // 医療品の補給（体力は戻らない）。ポーチがいっぱいなら拾わない
-          const total = P.med.tq + P.med.hemo + P.med.band + (P.med.medicine || 0);
+          const total = P.med.tq + P.med.hemo + P.med.band + (P.med.medicine || 0) + (P.med.stim || 0);
           if (total >= MED_CAPACITY + 2) continue;
           const got = [];
           for (const [k, n] of [['band', 2], ['tq', 1], ['hemo', 1]]) {
-            const room = MED_CAPACITY + 2 - (P.med.tq + P.med.hemo + P.med.band + (P.med.medicine || 0));
+            const room = MED_CAPACITY + 2 - (P.med.tq + P.med.hemo + P.med.band + (P.med.medicine || 0) + (P.med.stim || 0));
             const add = Math.min(n, room); if (add > 0) { P.med[k] += add; got.push(MED[k].name + '+' + add); }
           }
           HUD.msg('医療品を拾った　' + got.join('　')); HUD.medical();
@@ -841,21 +850,27 @@
       if (!G.Allies.list.length) { el.textContent = ''; return; }
       el.innerHTML = `<b>仲間　生存 ${G.Allies.alive().length} / ${G.Allies.list.length}</b>` + G.Allies.list.map(a => {
         const hp = a.dead ? 0 : Math.max(0, Math.min(100, Math.ceil(a.hp)));
-        const st = a.dead ? '戦闘不能・指示不可' : a.treat ? '処置中' : a.crippled ? '匍匐のみ・射撃可能' : a.bleedRate() > 0 ? '出血中・処置が必要' : a.hp < 50 ? '負傷' : a.moveState === 'moving' ? '移動中' : a.moveState === 'holding' || G.Allies.mode === 'hold' ? '待機' : '追従';
+        const st = a.dead ? '戦闘不能・指示不可' : P.treat?.ally === a ? '救護を受けています' : a.treat ? (a.treat.item === 'medicine' ? '自己治療中' : '止血中') : a.crippled ? '匍匐のみ・射撃可能' : a.bleedRate() > 0 ? '出血中・処置が必要' : a.hp < 50 ? '負傷' : a.moveState === 'moving' ? '移動中' : a.moveState === 'holding' || G.Allies.mode === 'hold' ? '待機' : '追従';
         return `<div class="ally-card ${a.dead ? 'dead' : a.bleedRate() > 0 || a.hp < 50 ? 'bad' : ''}" data-ally="${a.id}"><div class="ally-row"><strong>${a.name}</strong><span class="ally-state">${a.dead ? '✕ 死亡' : '● 生存'}</span><span class="ally-hp">${hp}/100</span></div><div class="ally-health"><i style="width:${hp}%"></i></div><small>${st}</small></div>`;
       }).join('');
     },
     // 出血の状態と医療品の数
     medical() {
       const el = $('med'); if (!el) return;
-      const ws = P.wounds || [], md = P.med || { tq: 0, hemo: 0, band: 0, medicine: 0 };
+      const ws = P.wounds || [], md = P.med || { tq: 0, hemo: 0, band: 0, medicine: 0, stim: 0 };
       const worst = ws.reduce((a, w) => (!a || w.rate > a.rate ? w : a), null);
       const rate = P.bleedRate ? P.bleedRate() : 0;
       const label = !worst ? '' : rate >= 1 ? '出血：激しい' : '出血：軽い';
       const parts = ws.map(w => ({ torso: '胴', arm: '腕', leg: '脚' }[w.area] + (w.type === 'light' ? '（軽）' : w.packed ? '（押さえ）' : '（重）'))).join('・');
       $('bleed').textContent = worst ? `${label}　${parts}　−${rate.toFixed(1)}/秒` : '';
       el.classList.toggle('bleeding', !!worst); el.classList.toggle('heavy', rate >= 1);
-      $('med-items').textContent = `止血帯 ${md.tq}　止血剤 ${md.hemo}　包帯 ${md.band}　治療薬 ${md.medicine || 0}`;
+      const mate = !P.dead && Game.state === 'playing' ? G.Allies.nearbyWounded(P, true) : null;
+      const aid = $('ally-aid-hint');
+      if (aid) {
+        const j = G.Touch.active ? '操作＋ → 仲間の救護' : G.keyName(G.Input.binds.assist);
+        aid.textContent = mate ? mate.name + '：' + j + (mate.bleedRate() > 0 ? ' 仲間の止血／回復' : ' 回復注射') : '';
+      }
+      $('med-items').textContent = `止血帯 ${md.tq}　止血剤 ${md.hemo}　包帯 ${md.band}　治療薬 ${md.medicine || 0}　回復注射 ${md.stim || 0}`;
     },
     ammo() {
       $('ammo-cur').textContent = P.ammo; $('ammo-res').textContent = P.reserve;
@@ -917,7 +932,7 @@
       const tb = $('treatbar');
       if (tb) {
         tb.classList.toggle('on', !!P.treat);
-        if (P.treat) { tb.querySelector('i').style.width = Math.min(100, P.treat.t / P.treat.dur * 100) + '%'; tb.querySelector('span').textContent = (P.treat.full ? G.MED[P.treat.item].name : '包帯（代用）') + 'で処置中'; }
+        if (P.treat) { tb.querySelector('i').style.width = Math.min(100, P.treat.t / P.treat.dur * 100) + '%'; tb.querySelector('span').textContent = (P.treat.ally ? P.treat.ally.name + '：' : '') + (P.treat.full ? G.MED[P.treat.item].name : '包帯（代用）') + 'で処置中'; }
       }
       this.medT = (this.medT || 0) - dt; if (this.medT <= 0) { this.medT = 0.25; this.medical(); this.allies(); }
       setStyle('vignette', 'opacity', (Math.round(this.vig * 20) / 20).toString());
@@ -926,7 +941,7 @@
       setClass('scope', 'on', P.adsT > 0.75 && P.cur === 'ar' && optic === 'scope');
       if(P.adsT>.75&&optic==='scope'){setStyle('scope','--glint-x',(32+Math.sin(P.yaw)*9)+'%');setStyle('scope','--glint-y',(23-P.pitch*7)+'%');}
       setClass('reddot', 'on', P.adsT > 0.8 && P.cur === 'ar' && optic === 'dot');
-      setClass('crosshair', 'hide', P.adsT > 0.2 || P.sprinting || P.knifeT >= 0);
+      setClass('crosshair', 'hide', P.dead || !!Game.deathCam || P.adsT > 0.2 || P.sprinting || P.knifeT >= 0);
       const gap = 6 + (P.moving ? 10 : 0) + (P.posture === 'stand' ? 3 : 0) + (G.time - P.lastShotT < 0.15 ? 5 : 0);
       setStyle('crosshair', '--gap', gap + 'px');
       setClass('reload-bar', 'on', P.reloading);
@@ -1062,7 +1077,7 @@
       this.team = saved.team === 'blue' ? 'blue' : 'red';
       this.allyCount = [0, 1, 2].includes(saved.allies) ? saved.allies : 2;
       this.loadout = Object.assign({ optic: 'scope', arSup: false, pistolSup: false }, saved.loadout || {});
-      this.loadout.med = Object.assign({ tq: 1, hemo: 1, band: 2, medicine: 1 }, this.loadout.med || {});
+      this.loadout.med = Object.assign({ tq: 1, hemo: 1, band: 2, medicine: 1, stim: 0 }, this.loadout.med || {});
       this.loadoutReady = false;
       this.isTouch = matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
       if (this.isTouch && !saved.q) this.quality = 'low';
@@ -1172,6 +1187,8 @@
     // ---- やられたとき：カメラを後ろへ引き、自分の体が倒れるところを見せる ----
     startDeathCam(from) {
       if (this.deathCam) return;
+      P.ads=false;P.adsT=0;P.reloading=false;P.treat=null;P.gHold=false;P.fireQueueT=0;
+      G.Viewmodel.resetActions();
       G.Input.enabled = false; G.Input.clear(); G.Touch.sync();
       const b = G.Humanoid.create({ style: 'swat', team: this.team, gear: 'helmet-sunglasses' }); this.scene.add(b.root);
       b.onSound = (kind, p) => { const at = p ? p.clone() : b.hipsWorld.clone(); if (kind === 'knee') G.Audio.kneeDrop(at); else if (kind === 'fall') G.Audio.bodyFall(at, 1.2); else if (kind === 'gun') G.Audio.gunClatter(at); };
@@ -1186,7 +1203,7 @@
       const cands = front ? [['x', -1, fwd.clone().negate()], ['z', 1, null], ['x', 1, fwd]] : [['x', 1, fwd], ['z', -1, null], ['x', -1, fwd.clone().negate()]];
       let pick = cands[0];
       for (const c of cands) { if (!c[2]) { pick = c; break; } const h = G.World.raycast(P.pos.x, 0.5, P.pos.z, c[2].x, 0, c[2].z, 2.0); if (!h) { pick = c; break; } }
-      b.update({ dt: 1 / 60, speed: 0, crouch: st.crouch, aim: 1, aimPitch: 0, twist: 0, reload: -1, scene: this.scene });
+      b.update({ dt: 1 / 60, speed: 0, crouch: st.crouch, prone: st.prone, aim: 1, aimPitch: 0, twist: 0, reload: -1, scene: this.scene });
       b.die(pick[0], pick[1], !!P.headLost);
       if (P.headLost && G.Game.dismember) b.st.sever = { part: 'head', side: 0, dir: toShooter.clone().negate() };   // 至近距離のショットガンで頭が飛ぶ
       // カメラの行き先：体の後ろ上方。壁があれば手前で止める
@@ -1202,6 +1219,7 @@
       $('vignette').style.opacity = 0.6;
     },
     updateDeathCam(dt) {
+      G.Viewmodel.setVisible(false);
       const D = this.deathCam; D.t += dt;
       const k = Math.min(1, D.t / 1.4), e = k * k * (3 - 2 * k);
       G.camera.position.lerpVectors(D.from, D.to, e);
@@ -1280,6 +1298,7 @@
       const edges = G.Input.takeEdges(), mouse = G.Input.takeMouse();
       if (this.deathCam) { this.updateDeathCam(dt); return; }
       P.update(dt, edges, mouse);
+      if(this.deathCam){this.updateDeathCam(dt);return;}
       // 一人称の銃と手
       const vr = G.Viewmodel.update({
         dt, time: G.time, moveSpeed: Math.min(1, Math.hypot(P.vel.x, P.vel.z) / 3.3), sprint: P.sprinting,
@@ -1303,6 +1322,7 @@
       if (G.Enemies.alive() === 0 && G.World.isExit(P.pos.x, P.pos.z)) this.end(true);
     },
     render() {
+      if(P.dead||this.deathCam)G.Viewmodel.setVisible(false);
       const r = this.renderer;
       if (this.usePost) {
         this.grade.uniforms.time.value = performance.now() / 1000;
@@ -1350,12 +1370,12 @@
       const onLo = () => { Game.loadout = { optic: lo.value, arSup: las.checked, pistolSup: lps.checked, med: Game.loadout.med }; Game.applyLoadout(); Game.saveSettings(); this.loadoutSummary(); };
       // 医療品（ポーチに入る数まで）
       const medUI = () => {
-        const md = Game.loadout.med, used = md.tq + md.hemo + md.band + md.medicine;
-        for (const k of ['tq', 'hemo', 'band', 'medicine']) $('lo-' + k).textContent = md[k];
+        const md = Game.loadout.med, used = md.tq + md.hemo + md.band + md.medicine + (md.stim || 0);
+        for (const k of ['tq', 'hemo', 'band', 'medicine', 'stim']) $('lo-' + k).textContent = md[k];
         $('lo-med-room').textContent = `ポーチの空き ${MED_CAPACITY - used} / ${MED_CAPACITY}`;
       };
       for (const b of document.querySelectorAll('[data-med]')) b.onclick = () => {
-        const k = b.dataset.med, d = +b.dataset.d, md = Game.loadout.med, used = md.tq + md.hemo + md.band + md.medicine;
+        const k = b.dataset.med, d = +b.dataset.d, md = Game.loadout.med, used = md.tq + md.hemo + md.band + md.medicine + (md.stim || 0);
         if (d > 0 && used >= MED_CAPACITY) return;
         md[k] = Math.max(0, Math.min(4, md[k] + d));
         Game.saveSettings(); medUI(); this.loadoutSummary();
@@ -1430,9 +1450,9 @@
     note(t) { $('menu-note').textContent = t; },
     loadoutSummary() {
       const L = Game.loadout;
-      const md = L.med || { tq: 0, hemo: 0, band: 0, medicine: 0 };
+      const md = L.med || { tq: 0, hemo: 0, band: 0, medicine: 0, stim: 0 };
       const squad = Game.allyCount === 2 ? 'ALPHA＋BRAVO' : Game.allyCount === 1 ? 'ALPHA' : '単独';
-      $('loadout-sum').textContent = `同行：${squad}／装備：ライフル（${L.optic === 'dot' ? 'ドットサイト' : 'スコープ'}${L.arSup ? '・サプレッサー' : ''}）／ハンドガン${L.pistolSup ? '（サプレッサー）' : ''}／ショットガン／手りゅう弾×2／止血帯×${md.tq}・止血剤×${md.hemo}・包帯×${md.band}・治療薬×${md.medicine}`;
+      $('loadout-sum').textContent = `同行：${squad}／装備：M4A1（${L.optic === 'dot' ? 'ドットサイト' : 'スコープ'}${L.arSup ? '・サプレッサー' : ''}）／Glock 17${L.pistolSup ? '（サプレッサー）' : ''}／Remington 870／手りゅう弾×2／止血帯×${md.tq}・止血剤×${md.hemo}・包帯×${md.band}・治療薬×${md.medicine}・回復注射×${md.stim || 0}`;
     },
     padNote(t) { $('pad-note').textContent = t; },
     padStatus() {

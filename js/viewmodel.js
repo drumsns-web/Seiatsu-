@@ -27,8 +27,8 @@
   function engravingTex() {
     const c = document.createElement('canvas'); c.width = 512; c.height = 96; const x = c.getContext('2d');
     x.clearRect(0, 0, 512, 96);
-    x.fillStyle = 'rgba(190,188,180,0.85)'; x.font = 'bold 34px sans-serif'; x.fillText('AR-7', 12, 42);
-    x.font = '22px sans-serif'; x.fillText('CAL 5.56×45mm', 120, 40); x.fillText('SN 702229', 12, 80);
+    x.fillStyle = 'rgba(190,188,180,0.85)'; x.font = 'bold 34px sans-serif'; x.fillText('M4A1', 12, 42);
+    x.font = '22px sans-serif'; x.fillText('CAL 5.56×45mm', 140, 40); x.fillText('SN 702229', 12, 80);
     x.font = 'bold 22px sans-serif'; x.fillText('SAFE', 330, 80); x.fillText('SEMI', 400, 80); x.fillText('AUTO', 455, 80);
     const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 8;
     return t;
@@ -103,11 +103,11 @@
     // トップレール（溝）
     for (let i = 0; i < 18; i++) put(g, box(M.metal, 0.024, 0.008, 0.012), 0, 0.075, 0.1 - i * 0.026);
     put(g, box(M.metal, 0.02, 0.006, 0.47), 0, 0.071, -0.12);
-    // ハンドガード（M-LOK風の穴）
-    const hg = put(g, box(M.fde, 0.054, 0.058, 0.31), 0, 0.04, -0.3);
-    for (let i = 0; i < 4; i++) {
-      put(g, box(M.polymer, 0.002, 0.012, 0.032), 0.0275, 0.038, -0.2 - i * 0.065);
-      put(g, box(M.polymer, 0.002, 0.012, 0.032), -0.0275, 0.038, -0.2 - i * 0.065);
+    // M4A1: black quad-rail handguard (simplified game mesh)
+    const hg = put(g, box(M.metal, 0.054, 0.058, 0.31), 0, 0.04, -0.3);
+    for (let i = 0; i < 10; i++) {
+      put(g, box(M.metal, .008, .027, .012), .03, .038, -.18-i*.027);
+      put(g, box(M.metal, .008, .027, .012), -.03, .038, -.18-i*.027);
     }
     put(g, box(M.polymer, 0.03, 0.03, 0.06), 0, 0.0, -0.38); // 下部ハンドストップ
     // 銃身・マズルデバイス
@@ -189,7 +189,7 @@
     return m;
   }
 
-  // ---- ハンドガン（オリジナル形状） ----
+  // ---- Glock 17: rectangular slide and polymer frame, simplified game mesh ----
   function buildPistol(M) {
     const g = new THREE.Group();
     const slide = new THREE.Group(); put(g, slide, 0, 0, 0);
@@ -202,7 +202,7 @@
     put(g, box(M.polymer, 0.02, 0.008, 0.06), 0, 0.0, -0.07);           // レール
     put(g, cylZ(M.metal, 0.006, 0.006, 0.02), 0, 0.036, -0.12);         // 銃口
     put(g, box(M.polymer, 0.031, 0.11, 0.046), 0, -0.045, 0.058, -0.22);  // グリップ
-    for (let i = 0; i < 5; i++) put(g, box(M.metal, 0.032, 0.004, 0.044), 0, -0.01 - i * 0.018, 0.05 + i * 0.004, -0.22);
+    for (let i = 0; i < 5; i++) put(g, box(M.polymer, 0.032, 0.004, 0.044), 0, -0.01 - i * 0.018, 0.05 + i * 0.004, -0.22);
     put(g, box(M.polymer, 0.006, 0.004, 0.045), 0, -0.012, 0.0);        // 用心金
     put(g, box(M.polymer, 0.006, 0.024, 0.004), 0, -0.003, -0.022);
     put(g, box(M.metal, 0.004, 0.016, 0.004), 0, -0.002, 0.012, 0.3);  // 引き金
@@ -216,7 +216,7 @@
     const muzzle = new THREE.Object3D(); put(g, muzzle, 0, 0.036, -0.135);
     return { group: g, mag, oldMag, part: slide, muzzle, magRot: new THREE.Euler(-0.22, 0, 0), sup, muzzleZ: -0.135, supLen: 0.135 };
   }
-  // ---- ポンプ式ショットガン（オリジナル形状） ----
+  // ---- Remington 870: tubular magazine and ribbed pump, simplified game mesh ----
   function buildShotgun(M) {
     const g = new THREE.Group();
     put(g, box(M.metal, 0.046, 0.066, 0.2), 0, 0.006, 0.0);           // 機関部
@@ -229,7 +229,7 @@
     put(g, cylZ(M.worn, 0.014, 0.014, 0.02), 0, -0.003, -0.52);
     const fore = new THREE.Group(); put(g, fore, 0, -0.004, -0.27);
     put(fore, box(M.polymer, 0.054, 0.048, 0.16), 0, 0, 0);
-    for (let i = 0; i < 7; i++) put(fore, box(M.polymer, 0.058, 0.004, 0.006), 0, -0.016, -0.06 + i * 0.02);   // 滑り止めの溝
+    for (let i = 0; i < 7; i++) put(fore, box(M.polymer, 0.058, 0.051, 0.006), 0, -0.016, -0.06 + i * 0.02);   // 滑り止めの溝
     put(g, box(M.polymer, 0.042, 0.066, 0.25), 0, -0.012, 0.22, 0.1);  // ストック
     put(g, box(M.gloveDark, 0.044, 0.12, 0.024), 0, -0.03, 0.35, 0.1);
     put(g, box(M.polymer, 0.032, 0.105, 0.042), 0, -0.07, 0.075, -0.3); // グリップ
@@ -427,7 +427,7 @@
   const pose = (x, y, z, rx, ry, rz, g) => ({ p: V3(x, y, z), r: V3(rx, ry, rz), g });
   const DEFS = {
     ar: {
-      name: 'AR-7 アサルトライフル', hip: V3(0.13, -0.175, -0.56), ads: V3(0.0, -0.118, -0.24), scope: true,
+      name: 'M4A1 カービン', hip: V3(0.13, -0.175, -0.56), ads: V3(0.0, -0.118, -0.24), scope: true,
       rPose: pose(0.012, -0.075, 0.07, -0.25, 0.15, 1.45, 0.95),
       poses: {
         grip: pose(-0.036, 0.022, -0.33, 0.75, 0, Math.PI / 2, 0.72),
@@ -451,7 +451,7 @@
       tilt: { rz: -0.62, rx: 0.12, ry: 0.12, px: -0.07, py: 0.06, pz: 0.04 }, flash: 1, kick: [1.6, 2.6],
     },
     pistol: {
-      name: 'P-9 ハンドガン', hip: V3(0.1, -0.13, -0.36), ads: V3(0.0, -0.06, -0.36), scope: false,
+      name: 'Glock 17 ハンドガン', hip: V3(0.1, -0.13, -0.36), ads: V3(0.0, -0.06, -0.36), scope: false,
       rPose: pose(0.012, -0.052, 0.058, -0.22, 0.15, 1.45, 1.0),
       poses: {
         grip: pose(-0.03, -0.064, 0.05, -0.15, -0.2, -1.45, 0.85),
@@ -474,7 +474,7 @@
       tilt: { rz: -0.3, rx: 0.3, ry: 0.15, px: -0.04, py: 0.05, pz: 0.03 }, flash: 0.7, kick: [2.2, 4.2],
     },
     shotgun: {
-      name: 'S-12 ショットガン', hip: V3(0.13, -0.17, -0.52), ads: V3(0.0, -0.054, -0.3), scope: false,
+      name: 'Remington 870 ショットガン', hip: V3(0.13, -0.17, -0.52), ads: V3(0.0, -0.054, -0.3), scope: false,
       rPose: pose(0.012, -0.072, 0.075, -0.25, 0.15, 1.45, 0.95),
       poses: {
         grip: pose(-0.036, -0.012, -0.27, 0.75, 0, Math.PI / 2, 0.75),
@@ -812,7 +812,7 @@
     return r;
   };
 
-  VM.setVisible = function (v) { VM.root.visible = v; };
+  VM.setVisible = function (v) { VM.root.visible = !!v && !G.Player?.dead && !G.Game?.deathCam; };
   // 装備：ライフルの照準器（'scope' 長距離スコープ ／ 'dot' 近距離ドットサイト）と、サプレッサーの有無
   VM.att = { ar: { optic: 'scope', sup: false }, pistol: { sup: false }, shotgun: {} };
   VM.setOptic = function (optic) {
