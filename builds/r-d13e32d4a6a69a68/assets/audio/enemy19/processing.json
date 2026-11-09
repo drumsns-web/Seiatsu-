@@ -1,0 +1,33 @@
+{
+  "archiveSHA256": "e9100a4e3b9dcd146993089970dc6097dcf9935fa4683b196040012bad65d67a",
+  "existingFiveSourceHashesMatched": true,
+  "newFilesMatchedArchive": true,
+  "files": [
+    {
+      "asset": "hurt-5.wav",
+      "source": "3grunt5.wav",
+      "originalSHA256": "32705e7835d0cdce3eb6e9d3a512ef128ee6c50564bd53bb0723b4474be85181",
+      "outputSHA256": "ca87b737d1976c864dcd5c2fbff47f9094af7904a10729398b5b87eec0894bb6",
+      "trimStart": 0.12467120181405895,
+      "duration": 0.37532879818594106,
+      "peak": 0.84,
+      "rms": 0.14317869405233283,
+      "gain": 2.471674598505321,
+      "pitchChanged": false,
+      "speedChanged": false
+    },
+    {
+      "asset": "hurt-6.wav",
+      "source": "3grunt6.wav",
+      "originalSHA256": "c334b34e7a64d67f226cd0a54fb237b8fbcc09e5ac6258a32fafcecc2c2e0857",
+      "outputSHA256": "027c298db1ed111b6a272ed6ef03abcab85595b8f8a6a653cb39f89b1f5567b4",
+      "trimStart": 0.39405895691609977,
+      "duration": 0.9629931972789115,
+      "peak": 0.84,
+      "rms": 0.10315859236651594,
+      "gain": 2.743352020180069,
+      "pitchChanged": false,
+      "speedChanged": false
+    }
+  ]
+}

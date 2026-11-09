@@ -1,0 +1,13 @@
+PUBLICATION PREPARATION — export candidate, not deployed
+
+BGM: retain the two user-created Gemini tracks under the original/noninfringing premise; see USER-BGM.txt. Former source-unknown note is superseded by this new user information. No CC0/MIT/exclusive-rights claim is made.
+
+Purchased assets: current authenticated Fab pages show My Library + Standard License for KINEMATION Lite, Spades Ultimate and Military Mercenary Bandit. Official Standard summary permits incorporated games/Projects and compatible tools; standalone asset redistribution is different. Browser retrievability alone does not establish a violation. Keep assets in the game; no automatic replacement or deletion. Full binding/acquisition terms copy remains uncollected.
+
+User animations: Adobe information is recorded without assuming all Adobe assets are Mixamo. The active grenade arm lineage is documented as Mixamo; official FAQ allows commercial games. Keep source FBX packs out of public runtime/source distribution. See USER-ANIMATION-SOURCE.txt.
+
+Remaining: public delivery of 24 local Windows David/Mark SAPI voice recordings is not conclusively established. This is uncertainty, not a finding that output is forbidden. No voices muted or replaced. Human CC0 grunts are separate sources. The public code repository and playable game must not grant unrelated reuse rights to purchased assets.
+
+No GitHub push/publication, asset deletion, new purchase or message to a third party has occurred. Old trial versions, ZIPs, models, motions, and original BGM remain intact. Existing performance holds are not cleared by this documentation.
+
+References: https://www.fab.com/eula ; https://helpx.adobe.com/creative-cloud/faq/mixamo-faq.html

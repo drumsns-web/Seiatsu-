@@ -1,0 +1,26 @@
+NPC casing and muzzle-ray correction
+
+No new art or audio files were imported for this change. The casing meshes,
+materials, sounds, character and weapon assets remain the existing project files.
+
+Implementation: original project JavaScript in effects.js, enemy.js and ally.js.
+NPC body coordinates are +Z forward, -X anatomical right, as documented by the
+existing Humanoid rig. Ejection directions now follow the actual gun transform.
+Kar98K/PDW90 use the existing converted Lite ejection anchor coordinates. Other
+NPC receivers use the existing approximate muzzle-relative offset. This is not
+a claim that every third-person mechanical ejection animation is authored.
+
+PDW90-style downward ejection reference, checked 2026-11-05:
+https://fnamerica.com/products/rifles/fn-p90/
+Manufacturer Product Features / Receiver specifies a bottom ejection port.
+No image or model was copied from this page.
+
+Existing audio provenance and processing:
+assets/audio/foley34/CREDITS.md (recorded cloth, tape and casing contacts; source
+records say CC0; the rifle calibre is explicitly qualified by its original author).
+assets/audio/enemy19/CREDITS.md (enemy reaction recordings).
+Purchased FPS Animation Lite and Bandit source/conversion records are preserved
+in the earlier project and export CREDITS. Purchase was reported by the user;
+the historical receipt/tier has not been independently reverified in this step.
+No new purchase, public upload or third-party asset submission was performed.
+No speaker audition was performed by the assistant in this change.

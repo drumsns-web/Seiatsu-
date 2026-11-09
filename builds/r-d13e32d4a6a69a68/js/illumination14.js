@@ -1,0 +1,61 @@
+'use strict';
+// Bounded shadowed sources. The logical light sample uses the same source geometry.
+(()=>{const G=window.G,T=THREE,W=G.World,L=G.Lamps,Lab=G.LightingLab,V=(x=0,y=0,z=0)=>new T.Vector3(x,y,z),clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+ const I=G.Illumination14={ready:false,revision:0,cache:new WeakMap(),materialOriginal:new WeakMap(),slots:[],windowSlots:[],clock:G.Storage.get('indoor_time14')||'day',lastScan:-Infinity,lastDynamic:-Infinity,refresh:new Set()};
+ I.dayPower=()=>G.Environment23?.ready?G.Environment23.externalPower():({morning:.6,day:1,dusk:.25,night:.025})[I.clock]??1;
+ I.invalidate=function(){this.revision++;this.cache=new WeakMap();L.field?.syncPower();if(G.Stealth13)G.Stealth13.lightCache=new WeakMap();for(const s of [...this.slots,...this.windowSlots])if(s.light?.visible)this.refresh.add(s.light);};
+ I.prepareShadow=function(light,size,far){light.castShadow=true;light.shadow.autoUpdate=false;light.shadow.camera.near=.06;light.shadow.camera.far=far;light.shadow.bias=-.00012;light.shadow.normalBias=.012;light.shadow.radius=1.2;if(light.shadow.mapSize.x!==size){light.shadow.mapSize.set(size,size);if(light.shadow.map){light.shadow.map.dispose();light.shadow.map=null;}this.refresh.add(light);}if(!light.shadow.map)this.refresh.add(light);};
+ I.materials=function(){const natural=Lab.mode==='natural'&&!W.def.outdoor;G.Game.scene.traverse(o=>{for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){if(!m.isMeshStandardMaterial)continue;if(!this.materialOriginal.has(m))this.materialOriginal.set(m,m.envMapIntensity);const base=Lab.materials.get(m)?.env??this.materialOriginal.get(m);m.envMapIntensity=W.outdoor&&G.Environment23?.ready?(Lab.mode==='natural'?.18:base)*G.Environment23.ambientScale():natural?.004:base;}});};
+ I.viewLight=function(){const natural=Lab.mode==='natural',level=Math.max(this.sample(G.Player),this.transient(G.Player),G.Equipment.light?.intensity>0?.32:0),shade=.06+.94*Math.sqrt(level);this.vmOriginal??=new WeakMap();G.Viewmodel.scene.traverse(o=>{if(o.isLight&&!o.isPointLight){if(!this.vmOriginal.has(o))this.vmOriginal.set(o,o.intensity);o.intensity=this.vmOriginal.get(o)*shade;}for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){if(!m.isMeshStandardMaterial)continue;if(!this.vmOriginal.has(m))this.vmOriginal.set(m,m.envMapIntensity);m.envMapIntensity=this.vmOriginal.get(m)*(.04+.96*level);}});};
+ I.apply=function(){if(!this.ready)return;const indoor=!W.def.outdoor,natural=Lab.mode==='natural'&&indoor,low=G.Game.quality==='low',high=G.Game.quality==='high';
+  this.capacity=low?2:high?5:4;this.windowCapacity=low?1:2;
+  if(indoor){G.Game.scene.background.set(natural?0x020304:this.background);if(G.Game.scene.fog)G.Game.scene.fog.color.set(natural?0x030405:this.fog);}
+  if(natural){for(const item of Lab.originalLights){if(item.light.isAmbientLight)item.light.intensity=item.intensity*.025;if(item.light.isHemisphereLight)item.light.intensity=item.intensity*.035;}if(W.sun){W.sun.intensity=0;W.sun.castShadow=false;}G.Game.renderer.shadowMap.enabled=true;}else if(W.sun)W.sun.castShadow=!low;
+  const shadowSize=low?256:high?768:512;
+  Lab.spots.forEach((light,i)=>{light.visible=natural&&i<this.capacity;light.castShadow=natural&&i<this.capacity;if(light.castShadow)this.prepareShadow(light,shadowSize,12);light.distance=11;});
+  for(const [i,s]of this.windowSlots.entries()){s.light.visible=natural&&i<this.windowCapacity;s.light.castShadow=s.light.visible;if(s.light.castShadow)this.prepareShadow(s.light,low?256:768,14);}
+  for(const light of [G.Effects.playerLight,G.Effects.enemyLight]){light.castShadow=natural;light.shadow.autoUpdate=false;if(natural)this.prepareShadow(light,256,7);}
+  this.materials();this.viewLight();this.setClock(this.clock,false);this.invalidate();this.assign(true);
+  const quality=document.querySelector('#quality option[value="low"]');if(quality)quality.textContent='軽量（影を減らす・画面効果なし）';
+ };
+ I.setClock=function(value,save=true){this.clock=['morning','day','dusk','night'].includes(value)?value:'day';if(save)G.Storage.set('indoor_time14',this.clock);const power=this.dayPower();for(const f of G.Windows14.list){if(f.exterior){f.exterior.material.color.set(this.clock==='dusk'?0x71849b:this.clock==='night'?0x122033:0xffffff);}}const select=document.getElementById('indoor-time14');if(select)select.value=this.clock;this.invalidate();if(this.ready)this.assign(true);};
+ I.visibleFrom=function(from,to){return W.lineOfSight(from.x,from.y,from.z,to.x,to.y,to.z);};
+ I.chooseFixtures=function(p,capacity=this.capacity){return L.fixtures.filter(f=>f.powered!==false).map(f=>({f,d:Math.hypot(f.x-p.x,f.z-p.z)})).sort((a,b)=>a.d-b.d).slice(0,Math.max(12,capacity*4)).map(v=>({...v,score:v.d+(this.visibleFrom(V(v.f.x,W.CEIL-.35,v.f.z),p)?0:8)})).sort((a,b)=>a.score-b.score).slice(0,capacity).map(v=>v.f);};
+ I.assign=function(force=false){if(!this.ready||W.def.outdoor||Lab.mode!=='natural')return;const now=performance.now();if(!force&&now-this.lastScan<180)return;this.lastScan=now;const p=G.camera.position;
+  const ranked=this.chooseFixtures(p);
+  // Keep each chosen fixture in its old slot; broken fixtures still occupy it.
+  const remaining=ranked.filter(f=>!this.slots.slice(0,this.capacity).some(s=>s.fixture===f));for(let i=0;i<Lab.spots.length;i++){const s=this.slots[i],light=s.light;if(i>=this.capacity){light.visible=false;light.intensity=0;continue;}light.visible=true;if(!ranked.includes(s.fixture)){s.fixture=remaining.shift()||null;if(s.fixture){const f=s.fixture;light.position.set(f.x,W.CEIL-.3,f.z);light.target.position.set(f.x,.05,f.z);light.target.updateMatrixWorld();this.refresh.add(light);}}const f=s.fixture;light.intensity=f&&!f.broken?(L.baseSpots[0]||5.4)*(f.id%3===2?.78:1):0;}
+  for(const p of Lab.originalPoints){p.visible=false;p.intensity=0;}
+  const wins=G.Windows14.list.map(f=>({f,score:Math.hypot(f.x-p.x,f.z-p.z)+(this.windowVisible(f,p)?0:12)})).sort((a,b)=>a.score-b.score).slice(0,this.windowCapacity).map(x=>x.f),remainingWindows=wins.filter(f=>!this.windowSlots.slice(0,this.windowCapacity).some(s=>s.fixture===f));
+  for(let i=0;i<this.windowSlots.length;i++){const s=this.windowSlots[i],light=s.light;if(i>=this.windowCapacity){light.intensity=0;continue;}if(!wins.includes(s.fixture)){s.fixture=remainingWindows.shift()||null;if(s.fixture){const f=s.fixture;light.position.set(f.x,2.13,f.z-f.inward*.28);light.target.position.set(f.x-.2,.3,f.z+f.inward*4);light.target.updateMatrixWorld();this.refresh.add(light);}}light.intensity=s.fixture?2.8*this.dayPower()*s.fixture.transmission:0;}
+  for(const f of L.fixtures)f.activeSlot14=this.slots.findIndex(s=>s.fixture===f&&s.light.visible);this.materials();this.viewLight();
+ };
+ I.windowVisible=function(f,p){if((p.z-f.z)*f.inward<0)return false;return[-.28,.28].some(dx=>[1.52,2.08].some(y=>this.visibleFrom(V(f.x+dx,y,f.z+f.inward*.07),p)));};
+ I.sample=function(target){if(W.def.outdoor)return G.Environment23?.ready?G.Environment23.outdoorLight(target):.9;const pos=target.pos||target,old=this.cache.get(target);if(old&&old.revision===this.revision&&old.fieldRevision===(L.field?.updates??0)&&G.time-old.time<.18&&old.pos.distanceToSquared(pos)<.09)return old.value;const natural=Lab.mode==='natural',point=V(pos.x,(pos.y||0)+(target.posture==='prone'?.3:target.posture==='crouch'?.8:1.15),pos.z);let value=.008+.018*(G.Environment23?.ready?G.Environment23.ambientScale():1);
+  if(L.field?.ready){value=clamp(value+L.field.sample(point),.025,1);this.cache.set(target,{time:G.time,pos:pos.clone(),revision:this.revision,fieldRevision:L.field?.updates??0,value});return value;}
+  const nearby=this.chooseFixtures(point,natural?this.capacity:6);for(const f of nearby){const d=Math.hypot(f.x-pos.x,f.z-pos.z);if(d<6.5&&!f.broken&&this.visibleFrom(V(f.x,W.CEIL-.35,f.z),point))value+=.86*(1-d/6.5)**2;}
+  for(const f of G.Windows14.list){const d=Math.hypot(f.x-pos.x,f.z-pos.z);if(d<11&&this.windowVisible(f,point))value+=.85*this.dayPower()*f.transmission*(1-d/11)**2;}
+  value=clamp(value,.025,1);this.cache.set(target,{time:G.time,pos:pos.clone(),revision:this.revision,fieldRevision:L.field?.updates??0,value});return value;
+ };
+ I.transient=function(target){const p=target.pos||target,point=V(p.x,(p.y||0)+1.1,p.z);let value=0;for(const light of [G.Effects.playerLight,G.Effects.enemyLight]){const dist=light.position.distanceTo(point);if(light.intensity>0&&dist<7&&this.visibleFrom(light.position,point))value=Math.max(value,Math.min(1,light.intensity/4)*(1-dist/7));}
+  const flash=G.Equipment.light;if(flash?.intensity>0){const v=point.clone().sub(flash.position),dist=v.length(),dir=flash.target.position.clone().sub(flash.position).normalize();if(dist<flash.distance&&v.normalize().dot(dir)>Math.cos(flash.angle)&&this.visibleFrom(flash.position,point))value=Math.max(value,.95*(1-dist/flash.distance));}return value;
+ };
+ const oldLight=G.Stealth13.light;G.Stealth13.light=function(target){return I.ready?I.sample(target):oldLight.call(this,target);};
+ const brightness=G.Stealth13.brightness;G.Stealth13.brightness=function(target){return Math.max(brightness.call(this,target),I.ready?I.transient(target):0);};
+ I.update=function(force=false){if(!this.ready)return;if(Lab.mode!=='natural'||W.def.outdoor)return;this.assign(force);
+  const doors=G.Doors.leaves.map(l=>Math.round(l.angle*40)+(l.broken?999:0)).join(',');if(doors!==this.doors){this.doors=doors;this.invalidate();}
+  const now=performance.now();if(now-this.lastDynamic>150){this.lastDynamic=now;const p=G.camera.position;for(const s of this.slots.filter(s=>s.light.visible&&s.light.intensity>0).sort((a,b)=>a.light.position.distanceToSquared(p)-b.light.position.distanceToSquared(p)).slice(0,2))this.refresh.add(s.light);}
+  let n=0;for(const light of this.refresh){if(light.visible&&light.castShadow)light.shadow.needsUpdate=true;this.refresh.delete(light);if(++n>=2&&!force)break;}
+ };
+ const lampsUpdate=L.update;L.update=function(force=false){if(!I.ready||Lab.mode!=='natural'||W.def.outdoor)return lampsUpdate.call(this,force);I.assign(force);return false;};
+ const labUpdate=Lab.update;Lab.update=function(force=false){if(!I.ready)return labUpdate.call(this,force);if(Lab.mode==='natural'&&!W.def.outdoor)I.update(force);else{const changed=L.update(force);if(changed||force)I.viewLight();}};
+ const labApply=Lab.apply;Lab.apply=function(){labApply.call(this);if(I.ready)I.apply();};
+ const quality=G.Game.applyQuality;G.Game.applyQuality=function(){quality.call(this);if(I.ready)I.apply();};
+ const init=L.init;L.init=function(){init.call(this);I.background=G.Game.scene.background.clone();I.fog=G.Game.scene.fog?.color.clone();I.slots=Lab.spots.map(light=>({light,fixture:null}));
+  const select=document.createElement('label');select.className='field';select.innerHTML='屋内の時間帯（窓からの外光）<select id="indoor-time14"><option value="day">昼</option><option value="dusk">夕方</option><option value="night">夜</option></select>';document.getElementById('lighting-mode')?.closest('label').after(select);select.hidden=!!W.def.outdoor||!G.Windows14.list.length;select.querySelector('select').onchange=e=>I.setClock(e.target.value);I.ready=true;I.apply();I.update(true);
+ };
+ const damage=L.damage;L.damage=function(hit){const ok=damage.call(this,hit);if(ok){const at=V(hit.lamp.x,hit.lamp.y,hit.lamp.z);G.Windows14.shatter(at,12,true);G.Enemies.broadcast(at,13,'lamp-break',false,null);I.invalidate();}return ok;};
+ const setCell=W.setCell;W.setCell=function(x,z,value){const before=this.cell(x,z),r=setCell.apply(this,arguments);if(I.ready&&before!==this.cell(x,z)){I.invalidate();L.field?.markGeometry({x:x+.5,z:z+.5});}return r;};
+ for(const key of ['playerFlash','enemyFlash']){const fn=G.Effects[key];G.Effects[key]=function(p){if(key==='playerFlash'&&G.camera){const origin=G.camera.position,dir=p.clone().sub(origin),len=dir.length();dir.normalize();const h=W.raycast(origin.x,origin.y,origin.z,dir.x,dir.y,dir.z,len);if(h)p=origin.clone().addScaledVector(dir,Math.max(.02,h.t-.07));}fn.call(this,p);const light=key==='playerFlash'?this.playerLight:this.enemyLight;light.intensity=key==='playerFlash'?4.5:3.8;light.shadow.needsUpdate=true;};}
+ const reset=G.Game.reset;G.Game.reset=function(){const r=reset.call(this);if(I.ready){I.invalidate();I.assign(true);}return r;};
+})();

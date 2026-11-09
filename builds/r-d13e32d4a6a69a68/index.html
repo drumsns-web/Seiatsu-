@@ -1,0 +1,37 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>制圧 — 読み込み</title><style>body{background:#10191e;color:#edf1e8;font:16px/1.7 sans-serif;max-width:760px;margin:15vh auto;padding:24px}button{padding:10px 20px}</style></head><body><p id="release-status">更新を確認しています…</p><button hidden id="release-retry" onclick="location.reload()">再読み込み</button><script>/* Export loader owner. Embedded in root/build index; no service worker. */
+(async function bootRelease(config){
+  'use strict';
+  const status=document.getElementById('release-status');
+  const base=new URL(config.build?'../../':'./',location.href);
+  const validId=id=>typeof id==='string'&&/^r-[a-f0-9]{16}$/.test(id);
+  const current=async()=>{
+    const url=new URL('release.json',base);url.searchParams.set('check',Date.now()+'-'+Math.random().toString(36).slice(2));
+    const response=await fetch(url,{cache:'no-store',credentials:'same-origin'});
+    if(!response.ok)throw new Error('更新情報を取得できません ('+response.status+')');
+    const manifest=await response.json();
+    if(manifest.schema!==1||!validId(manifest.id)||!/^[a-f0-9]{64}$/.test(manifest.gameSha256))throw new Error('更新情報の形式を確認できません');
+    return manifest;
+  };
+  try{
+    const release=await current();
+    if(config.build!==release.id){
+      const target=new URL('builds/'+release.id+'/index.html',base);target.search=location.search;target.hash=location.hash;
+      location.replace(target.href);return;
+    }
+    const url=new URL('builds/'+release.id+'/game.html',base);url.searchParams.set('build',release.id);
+    const response=await fetch(url,{cache:'no-store',credentials:'same-origin'});
+    if(!response.ok)throw new Error('ゲームの準備中です ('+response.status+')');
+    const bytes=await response.arrayBuffer();
+    if(!crypto.subtle)throw new Error('安全な接続で開いてください (HTTPS または localhost)');
+    const digest=await crypto.subtle.digest('SHA-256',bytes);
+    const hash=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
+    if(hash!==release.gameSha256)throw new Error('更新中のファイルを検出しました。少し待って再読み込みしてください');
+    // Parser-inserted original scripts retain their order and relative URLs.
+    // This guarded URL remains the base for models, audio, CSS and dynamic fetch.
+    const html=new TextDecoder().decode(bytes);document.open();document.write(html);document.close();
+  }catch(error){
+    if(status)status.textContent='読み込みを完了できません。'+error.message+'。接続と配信完了を確認して再読み込みしてください。';
+    const retry=document.getElementById('release-retry');if(retry)retry.hidden=false;
+  }
+})({"build":"r-d13e32d4a6a69a68"});
+</script></body></html>

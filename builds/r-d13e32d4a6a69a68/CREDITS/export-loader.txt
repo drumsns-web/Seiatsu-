@@ -1,0 +1,1 @@
+Static release loader/cache-versioning code authored locally for this prototype. No third-party visual/audio asset created or added. Existing source credits preserved; personal absolute paths removed only from export copies.

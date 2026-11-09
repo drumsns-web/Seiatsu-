@@ -1,0 +1,23 @@
+USER-PROVIDED BGM — export provenance record, 2026-11-09
+
+Frontline Siege_mixed.mp3 / Terminal Weight_mixed.mp3
+Origin: the user reports creating both tracks with Gemini "plus". This is user-supplied provenance, not inferred from filenames/encoder tags.
+Preparation decision: retain both tracks in the game, on the authorized premise that they are original and contain no unauthorized third-party music/material.
+Google's official music help describes download and sharing. Google Terms, effective 2026-07-30, states that Google does not claim ownership of original generated content. This is not a guarantee of exclusive copyright, clearance of third-party rights, or a CC0/MIT/stock-library license.
+No source MP3 bytes were edited, re-encoded or removed. No watermark removal or detection performed.
+
+Frontline Siege_mixed.mp3
+Runtime: assets/audio/user-bgm/frontline-siege-mixed.mp3
+SHA256: d6b6c692311c32f983b2e2ca4f8d1de2cd3253705b0eb8787395989582b3fe0f
+Current role: Title / sortie preparation. Clear-screen request remains a separate gameplay item.
+
+Terminal Weight_mixed.mp3
+Runtime: assets/audio/user-bgm/terminal-weight-mixed.mp3
+SHA256: f53a408dba4a2bbc26d24176f4f0e8a9fce33f2775e6368f3e790ddd18737276
+Current role: Player death / defeat.
+
+References:
+https://support.google.com/gemini/answer/16901237?hl=ja
+https://policies.google.com/terms?gl=jp&hl=ja
+
+This credit supersedes the former source-unknown BGM note in this newly hashed export. The existing immutable ZIP/build was not edited. No new playback/listening QA or clear-screen music fix is claimed by this credit update.

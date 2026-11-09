@@ -1,0 +1,18 @@
+Landscape39 / 2026-11-05
+
+Two original, AI-generated photographic-style game backgrounds, produced with the
+built-in image_gen tool. No reference image, purchased character, sound, or other
+third-party asset was uploaded. These are synthetic vistas, not photographs of a
+named real location. No external stock image was downloaded or purchased.
+
+Runtime files: north.png (2172 x 724), south.png (2172 x 724).
+Generated PNG bytes are preserved without repainting, cropping or compression.
+Two ordinary planes and two textures replace the animated sea and distant terrain.
+
+Prompt set:
+
+NORTH
+Use case: photorealistic-natural. Asset type: wide 3:1 landscape photographic background texture for a lightweight first-person game window, NORTH view. Generate an ordinary realistic countryside panorama, eye level on the edge of a broad grassy plateau. Foreground and middle distance are expansive muted green grassland with a few tiny low rural utility buildings in the middle distance, irregular scattered trees, a distant layered mountain range with low uneven ridges and atmospheric blue gray haze. The mountains are far away and not towering: horizon and mountain crest around 43% down from the top; broad grassland fills bottom half; pale blue lightly cloudy daylight sky fills upper 40%. Natural landscape photograph, restrained saturation, coherent flat overcast sunlight, detailed but calm, normal 45mm lens look without fisheye distortion. This is a distant scene viewed from a building, no nearby objects, no window frame or interior, no water or sea, no single conical volcano or Mt Fuji, no dramatic central peak, no city skyline, no text, no labels, no watermark, no illustration. One continuous wide 3:1 panorama, not multiple panels.
+
+SOUTH
+Use case: photorealistic-natural. Asset type: a wide 3:1 distant landscape photograph texture for the SOUTH-facing windows of a lightweight first person game. Create one continuous ordinary realistic photograph of open grassland with scattered trees and a few very small low rural buildings, viewed from a grassy plateau toward a distinct faraway mountain range. This view looks different from a flat low range: the mountains are asymmetrical overlapping ridges, with a broad valley toward the left and a long higher broken ridge on the right, softened by blue gray atmospheric haze. Not dramatic or steep right beside the camera. Middle distance has a small cluster of utility sheds toward the right and a few trees, foreground is broad gently rolling grass. Muted natural green and pale blue lightly cloudy daylight sky; sky fills upper 40%, distant ridgeline near 43% image height; grass fills lower half. Natural editorial landscape photography, normal lens perspective, realistic scale and fine textures, calm lighting with soft shadows, no exaggerated HDR, no illustration. Nothing close to the viewer, no frame or interior, no water, no sea, no conical volcano, no Mt Fuji, no single centered peak, no text, no watermark, no montage or split panels. One wide 3:1 landscape panorama.

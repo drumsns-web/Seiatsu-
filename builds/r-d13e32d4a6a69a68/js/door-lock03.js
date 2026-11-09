@@ -1,0 +1,11 @@
+'use strict';
+(()=>{const G=window.G,D=G.Doors;
+ D.inside=function(g,pos=G.Player.pos){return(pos.x-g.x)*g.nx+(pos.z-g.z)*g.nz>.08;};
+ D.lockHardwareOK=g=>g.leaves.every(l=>!l.broken&&!l.knobBroken);
+ D.center=g=>new THREE.Vector3(g.x+(g.axis==='x'?g.width/2:0),0,g.z+(g.axis==='z'?g.width/2:0));
+ D.lockReason=function(g,actor=G.Player){if(!g||!this.groups.includes(g))return'対象の扉がありません';if(!actor||actor.dead||actor.crippled||actor.legLost||actor.treat)return'現在は施錠操作できません';if(!this.lockHardwareOK(g))return'ノブか扉が壊れているため施錠できません';if(!this.inside(g,actor.pos))return'施錠・解錠は室内側から行います';const c=this.center(g);if(Math.hypot(c.x-actor.pos.x,c.z-actor.pos.z)>2.45)return'扉に近づいてください';if(g.target>.025||g.leaves.some(l=>l.angle>.025))return'先に扉を完全に閉めてください';return null;};
+ D.setInteriorLock=function(g,locked=true,actor=G.Player){this.lastLockError=this.lockReason(g,actor);if(this.lastLockError)return false;locked=!!locked;if(g.locked===locked&&g.interiorLocked===locked)return true;g.locked=locked;g.interiorLocked=locked;g.aiWork=null;G.Audio.lockPick?.(this.center(g).setY(1.02),true);return true;};
+ D.toggleInteriorLock=function(g=this.target()){const P=G.Player;if(P.dead||P.treat||P.reloading||P.gHold)return false;const ok=this.setInteriorLock(g,!g?.locked,P);if(!ok){G.HUD.msg(this.lastLockError);return false;}this.cancel();G.HUD.msg(g.locked?'内側から施錠しました':'内側から解錠しました');return true;};
+ const prompt=D.updatePrompt;D.updatePrompt=function(){prompt.call(this);if(this.choice||this.manual||this.hint?.hidden)return;const g=this.target();if(!g)return;if(!this.lockHardwareOK(g)){this.hint.textContent+=' ／ 錠前破損：施錠不可';return;}if(this.inside(g)&&g.leaves.every(l=>l.angle<=.025)&&g.target<=.025)this.hint.textContent+=' ／ '+G.keyName(G.Input.binds.doorLock)+(g.locked?'：内側から解錠':'：内側から施錠');};
+ const reset=D.reset;D.reset=function(){reset.call(this);for(const g of this.groups){g.interiorLocked=false;g.breachStart=null;g.breachLast=null;}};
+})();

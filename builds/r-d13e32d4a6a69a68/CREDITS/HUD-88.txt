@@ -1,0 +1,1 @@
+Original local code: ally status DOM nodes are reused; weapon/permission labels owned by main HUD, old wrappers removed. Existing CSS uses normal flow and layout containment instead of synchronous offset measurements. No new external assets or purchases. Existing credits retained.

@@ -1,0 +1,15 @@
+'use strict';
+// Two static photographic vistas. No animated sea or distant terrain render pass.
+(()=>{const G=window.G,T=THREE,C=G.Coast15,N=G.Coast33,E=G.Environment23,S=G.CoastSound33,L=G.Landscape39={enabled:true,ready:false,planes:[],errors:[]};
+ L.apply=function(){if(!this.ready)return;const time=E.time(),weather=E.weather(),power=time.sky*weather.sky,tint=new T.Color(E.active.time==='morning'?0xf8e7cf:E.active.time==='dusk'?0xe6c7b9:E.active.time==='night'?0x9cb8dd:0xffffff).convertSRGBToLinear();for(const p of this.planes){p.visible=this.enabled;p.material.color.copy(tint).multiplyScalar(power);}}
+ L.visibility=function(){if(!C.ready)return;const hidden=this.enabled&&this.ready;for(const m of [C.sky,C.sea])if(m)m.visible=!hidden;for(const m of N.backdrops||[])m.visible=!hidden&&!!N.textureReady;for(const m of N.ranges||[])m.visible=!hidden&&!N.textureReady;for(const f of G.Windows14.list)f.exterior.visible=false;for(const p of this.planes)p.visible=hidden;};
+ L.set=function(enabled){this.enabled=!!enabled;this.apply();this.visibility();if(this.enabled)S.silence();};
+ L.build=function(){if(!C.ready||this.promise)return;const paths=['north','south'];this.promise=Promise.all(paths.map((name,i)=>new Promise((resolve,reject)=>{const texture=new T.TextureLoader().load('assets/landscape39/'+name+'.png',()=>resolve(texture),undefined,reject);texture.encoding=T.sRGBEncoding;texture.generateMipmaps=false;texture.minFilter=texture.magFilter=T.LinearFilter;const material=new T.MeshBasicMaterial({map:texture,side:T.DoubleSide,fog:false,toneMapped:false});const height=700/3,plane=new T.Mesh(new T.PlaneGeometry(700,height),material);plane.name='landscape39-'+name;plane.position.set(G.World.W*.5,1.64-height*.05,i===0?-150:G.World.H+150);plane.rotation.y=i===0?0:Math.PI;plane.castShadow=plane.receiveShadow=false;plane.visible=false;plane.userData.direction=name;G.Game.scene.add(plane);this.planes.push(plane);}))).then(()=>{this.ready=true;this.apply();this.visibility();return true;}).catch(e=>{this.errors.push(e.message||String(e));console.error('Landscape background',e);return false;});};
+ const build=C.build;C.build=function(){const result=build.apply(this,arguments);L.build();return result;};
+ const apply=E.applyCoast;E.applyCoast=function(){const result=apply.apply(this,arguments);L.apply();L.visibility();return result;};
+ const render=G.Game.render;G.Game.render=function(){L.visibility();return render.apply(this,arguments);};
+ // Coastal recordings do not belong to a grassland landscape. Retain their assets.
+ for(const key of ['fetch','setup']){const fn=S[key];S[key]=function(){return L.enabled?Promise.resolve(null):fn.apply(this,arguments);};}
+ const active=S.active;S.active=()=>!L.enabled&&active();const update=S.update;S.update=function(){if(L.enabled){if(this.targetGain)this.silence();return;}return update.apply(this,arguments);};
+ const ui=E.ui;E.ui=function(){const result=ui.apply(this,arguments);document.getElementById('coast33-volume')?.closest('label').setAttribute('hidden','');return result;};
+})();

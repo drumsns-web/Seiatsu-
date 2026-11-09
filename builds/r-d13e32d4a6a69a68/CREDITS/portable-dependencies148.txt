@@ -1,0 +1,35 @@
+Portable runtime dependency copies (local existing files; no purchase or download)
+
+The local prototype previously fetched two models from sibling fps01 and six audio files from sibling gun-compare. For a self-contained static GitHub-style package the owning fps-native.js/fps-sound.js URLs now point within assets/. All eight binaries are byte-identical copies; source originals and first148 snapshot preserved. No new animation/audio generation or additional asset entitlement is asserted. Existing source credits apply; acquired license/tier and public/source redistribution are NOT independently confirmed. Private review/test use only until publication conditions confirmed.
+
+prototype/fps01/assets/arms-web.glb -> assets/lite-mx16/arms-web.glb
+SHA256 bbdf2ba8a23ade85f14e7870eee52f8837685dbd1f835c7c9722a3b993620651
+Bytes 16497192
+
+prototype/fps01/assets/gun.glb -> assets/lite-mx16/gun.glb
+SHA256 142c67e895e87a7c3409288e82a659b2990422652218a874a41bfe3780c2dc5b
+Bytes 2325568
+
+prototype/gun-compare/audio/Fire_A.wav -> assets/audio/lite-mx16/Fire_A.wav
+SHA256 60b28e5ce7ca6cfc7674ec3b1a4e03c769cc1418f38abadc8c9fc0877ca3f04e
+Bytes 558044
+
+prototype/gun-compare/audio/Fire_B.wav -> assets/audio/lite-mx16/Fire_B.wav
+SHA256 b66202a89db3b811128906f0d20bb2a65699ff1280767abb6cadaad4958d5a88
+Bytes 558044
+
+prototype/gun-compare/audio/Fire_C.wav -> assets/audio/lite-mx16/Fire_C.wav
+SHA256 76d56eea679f175b1dc1bbd1e18680bf41d72b32355c7c6333e356406894335b
+Bytes 558044
+
+prototype/gun-compare/audio/Fire_D.wav -> assets/audio/lite-mx16/Fire_D.wav
+SHA256 d236beaecfbb5d2c614df83d2ffb14972ac93f28d0c2449c925c03cccaf161b9
+Bytes 558044
+
+prototype/gun-compare/audio/Reload_Tac.wav -> assets/audio/lite-mx16/Reload_Tac.wav
+SHA256 329fc4bc93c09f62d4ba50d030ef93a0ae17307f85907c2361ce3b9f28f04090
+Bytes 516140
+
+prototype/gun-compare/audio/Reload_Empty.wav -> assets/audio/lite-mx16/Reload_Empty.wav
+SHA256 8cf1f3962c2eb88bf108f97b5d2fd95de983ca26976f5f5ab38c1f3b14c94cde
+Bytes 612908

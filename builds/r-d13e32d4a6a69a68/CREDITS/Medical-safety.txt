@@ -1,0 +1,1 @@
+Medical self-care safety correction: original project JavaScript in ally.js. No new artwork, audio, textures, purchased content, or third-party asset was imported. Current recordings and their existing attribution remain unchanged. Automated QA is not human audition.

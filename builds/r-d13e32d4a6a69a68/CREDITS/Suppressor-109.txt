@@ -1,0 +1,2 @@
+Suppressor presentation: existing licensed KINEMATION arm meshes and owned Spades/Lite weapons retained. New local code lowers the current grip; it is not an authored hand-screwing animation. Existing screw Foley unchanged. No new external asset or license claim. Original source credits preserved.
+Inherited selected-muzzle defect: FPSExtra10 visualMuzzle owner now returns the active purchased Spades shotgun muzzle instead of the hidden Drake base. No asset change.

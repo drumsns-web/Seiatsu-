@@ -1,0 +1,15 @@
+'use strict';
+// Keep the selected appearance from the first visible frame through injuries.
+// The legacy rig remains alive for animation, collision and ragdoll dependencies.
+(()=>{const G=window.G,B=G.Bandit,A=G.Appearance,D=G.Appearance39={hiddenLayer:1<<30};
+ D.pending=h=>!!h&&B.enabled&&(!B.ready||!h.banditMeshes||(h.banditTeam==='player'&&G.Game.loadout.operator31!==false&&!G.Operator31.ready));
+ D.hide=function(h){h.banditOriginal??={layers:h.mesh.layers.mask,shadow:h.mesh.castShadow,gear:h.gear?.visible};h.mesh.layers.mask=this.hiddenLayer;h.mesh.castShadow=false;if(h.gear)h.gear.visible=false;for(const m of h.banditMeshes||[])m.visible=false;if(h.banditHelmet)h.banditHelmet.visible=false;if(h.operator31)for(const o of [h.operator31.helmet,h.operator31.radio,...Object.values(h.operator31.eyes||{})])if(o)o.visible=false;if(!h.appearancePending39)h.pendingGun39=h.gun.visible;h.gun.visible=false;h.appearancePending39=true;};
+ const sync=B.sync;B.sync=function(h){if(D.pending(h)){D.hide(h);return;}if(h.appearancePending39)h.gun.visible=h.pendingGun39;h.appearancePending39=false;if(!h.banditMeshes&&h.banditOriginal){h.mesh.layers.mask=h.banditOriginal.layers;h.mesh.castShadow=h.banditOriginal.shadow;if(h.gear)h.gear.visible=h.banditOriginal.gear;return;}return sync.apply(this,arguments);};
+ const register=B.register;B.register=function(h){const result=register.apply(this,arguments);this.sync(h);return result;};
+ B.describe=function(){if(!this.status)return;this.status.textContent=!this.enabled?'従来モデルを表示しています。':this.error?'人物素材を読み込めませんでした。ページを再読み込みしてください。':!this.ready?'人物素材を読み込み中です。準備が終わるまで人物の表示と出撃を待ちます。':'現在の人物素材を表示しています。負傷・死亡後も同じ顔・服・装備を維持し、損傷部位だけを反映します。';};
+ D.preview=function(){const canvas=document.getElementById('face-preview');if(!canvas)return;let status=document.getElementById('appearance-loading39');if(!status){status=document.createElement('p');status.id='appearance-loading39';status.className='small';status.setAttribute('role','status');canvas.after(status);}const pending=this.pending(A.body),failed=B.error||G.Operator31.errors?.length;status.hidden=!pending;status.textContent=failed?'人物の準備に失敗しました。ページを再読み込みしてください。':'人物と装備を読み込み中…';if(pending){const note=document.querySelector('#appearance-loadout p.small');if(note)note.textContent=status.textContent;}};
+ const render=A.render;A.render=function(){const result=render.apply(this,arguments);D.preview();return result;};
+ const preview=G.Operator31.renderPreview;G.Operator31.renderPreview=function(){if(D.pending(A.body)){D.preview();return;}return preview.apply(this,arguments);};
+ const init=B.init;B.init=function(){const result=init.apply(this,arguments);this.describe();for(const h of this.actors)this.sync(h);D.preview();this.promise.then(()=>{this.describe();D.preview();});return result;};
+ const begin=G.Game.begin;G.Game.begin=function(){if(B.enabled&&(!B.ready||(this.loadout.operator31!==false&&!G.Operator31.ready))){G.Menu.note(B.error||G.Operator31.errors?.length?'人物の準備に失敗しました。ページを再読み込みしてください。':'人物と装備を読み込み中です。準備完了後に出撃してください。');return;}return begin.apply(this,arguments);};
+})();

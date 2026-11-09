@@ -1,0 +1,81 @@
+{
+  "text": "Contact. Awaiting permission.",
+  "engine": "Installed Windows SAPI OneCore; local file output only, no cloud/upload",
+  "sampleRate": 22050,
+  "originalClipsPreserved": 20,
+  "originalClipHashes": {
+    "alpha/arrived": "90e25aaeeba98d14a4730178dddc08bdc3fffbb9ad0de81c866c08cda02be045",
+    "alpha/contact": "4a0eeb9e7a3d35381b922a8bd6f9517bffeb8ce89bdb2b0676124c735700f718",
+    "alpha/contact_whisper": "41f9e5d103ca1b6511a643fc89fb59cc14382f52e5bced3c86a8d265fbb53a32",
+    "alpha/contact_shout": "6eb8c09c807564792eb8b410cb104a151e4030b28150d3f280f7fa34d4932279",
+    "alpha/follow": "722467b8013febdc9bed5aed13f23035064459519822b1c6b8a0e9ad334ec749",
+    "alpha/hold": "3f660235922e1234e827b0c259d3b247ed0aaebace1b418cdc7dccdafaa66360",
+    "alpha/kill": "1aaab3aa73e640f0c80df362775de19cb5c948cd8e33955fb0ee8ab870ca6d39",
+    "alpha/move": "255b6ace048b94e1ab2e05f06298427f2ec090d2a7a9f337a295af76cc4b4a0c",
+    "alpha/move2": "349435a965aea5c2af6352bc92da2d5502507e9b4733a45df79a4bec1a141b5c",
+    "alpha/unreachable": "8734f8902498cca3110c1c8b02cf7cc26888ce39400ddcb27ca09818a61bbc15",
+    "bravo/arrived": "7c3dfec37832fa1c0db34a8ec9a864dcc426e99467d1085d15029b124a2275b2",
+    "bravo/contact": "ffcdc9aba8c5b20d4af05e0c7f68ccdcda2c94c5bb807e94845de962d16b193d",
+    "bravo/contact_whisper": "633210e84ba8857d42c36503f857c7e952e6f2f32f9a5f0232c75042c5ec84fe",
+    "bravo/contact_shout": "28ddeb52b3e4a7539f467ef5ad4b6f05e98ce72fee3e70197dc3b6b329570632",
+    "bravo/follow": "b66ebe9a92f7811db70cbc45750ae72244953d24e779a6adcaaf349d3594394c",
+    "bravo/hold": "bf9f07123ced32efafb9597784419a252c5d9b885402dba8c79f84bd0062abb8",
+    "bravo/kill": "60369eb557dbe47c99c9a73dba495a82c57b1b465fa438d72354fa20001e987e",
+    "bravo/move": "6b5e3ec859a7b4a1585b9b473d36dde72f4e8799fe6145e4ab0b78ad00fa0df0",
+    "bravo/move2": "da1358b2284d9b6e643be775398ed60991a15f8af137257837c402bab91e1fdc",
+    "bravo/unreachable": "2cb6ba47bd64074a4a50b4dae2cd1ff2f61239f31ba484616e597d9cb1f316f0"
+  },
+  "processing": "Same basic trim/fade and breath/high-frequency blend as original contact variants. No pitch/time resampling. This is processed synthetic speech, not a recorded or human-validated natural whisper.",
+  "license": "Windows-installed proprietary voices. Public/commercial redistribution rights have not been conclusively verified; private local test only, not CC0.",
+  "sourceDocs": "https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms723597(v=vs.85)",
+  "files": [
+    {
+      "actor": "alpha",
+      "voice": "Microsoft David",
+      "sourceSHA256": "27b2d58a16ece5cee74aa8f77e17fc54844003ec1719f9fccf9e769890fa4ed7",
+      "trimStartSeconds": 0.0582312925170068,
+      "rows": {
+        "permission": {
+          "file": "alpha-permission.wav",
+          "sha256": "787ecae28197ac5b07b247c3f9a55fd9a4b7c455f4e541930791037426888275",
+          "frames": 47884,
+          "seconds": 2.171609977324263,
+          "peak": 0.9542236328125,
+          "rms": 0.08476113646147175
+        },
+        "permission_whisper": {
+          "file": "alpha-permission_whisper.wav",
+          "sha256": "ecc4448f48318f46dee3fde5990b3a6cecb9fc1eb384812c80087555ca1001e8",
+          "frames": 47884,
+          "seconds": 2.171609977324263,
+          "peak": 0.78,
+          "rms": 0.060140599329279995
+        }
+      }
+    },
+    {
+      "actor": "bravo",
+      "voice": "Microsoft Mark",
+      "sourceSHA256": "e27e5c5b256d16c99c8433a56363d528094847a56d9f48e0ea784a1b33f16698",
+      "trimStartSeconds": 0.08512471655328799,
+      "rows": {
+        "permission": {
+          "file": "bravo-permission.wav",
+          "sha256": "7671f9bc5b9d68e8dbcc466a1f8077d342bbd884c63ce27fbcf6985c68a564d9",
+          "frames": 44820,
+          "seconds": 2.0326530612244897,
+          "peak": 0.527099609375,
+          "rms": 0.08121791695006167
+        },
+        "permission_whisper": {
+          "file": "bravo-permission_whisper.wav",
+          "sha256": "2725601c14acbc8a98c154824c711201a9708edd06c9ff86666c66a996bc9076",
+          "frames": 44820,
+          "seconds": 2.0326530612244897,
+          "peak": 0.48512327434985886,
+          "rms": 0.059204963188819466
+        }
+      }
+    }
+  ]
+}

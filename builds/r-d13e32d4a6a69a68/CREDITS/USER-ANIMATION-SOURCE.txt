@@ -1,0 +1,12 @@
+USER ANIMATION SOURCE — export provenance record, 2026-11-09
+
+User now reports Adobe subscription origin. Earlier downloads were explicitly described as Mixamo in conversation. The currently used Grenade Throw arm conversion is recorded locally as user-provided Mixamo; its exact original SHA256 is 7b5a795ac85ec34b96921471bf33d5c89f57a1ecfdf1a4065a665866cfca99cc. The active JSON matches that lineage.
+
+The received batch contains 47 FBX files. FBX SDK creator tags and Mixamorig joint names are technical evidence, not a per-file acquisition/license receipt. Do not assume every Adobe-origin file is Mixamo or Adobe Stock.
+
+Official Mixamo FAQ permits royalty-free personal/commercial/nonprofit video-game use and says no Creative Cloud subscription is required. Use that allowance for actual Mixamo-sourced clips. Do not provide original FBX packs as an independent animation library or apply an invented blanket license.
+
+Only the runtime arm subset is shipped in this export; all 47 originals and conversion workbench remain local and excluded. Existing movements/models/arms are unchanged by this documentation preparation.
+https://helpx.adobe.com/creative-cloud/faq/mixamo-faq.html
+
+2026-11-09 file check: all 47 supplied FBX files contain a literal mixamo.com identifier. Together with the user report and earlier explicit Mixamo context, this supports Mixamo export provenance. It is not a receipt or proof of a particular account/date/plan. Raw FBX files remain excluded.
