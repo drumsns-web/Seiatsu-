@@ -1,0 +1,20 @@
+# Static web exports: normalize text before hashing and keep binary assets unchanged.
+* text=auto eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.glb -text
+*.bin -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.webp -text
+*.mp3 -text
+*.wav -text
+*.ogg -text
+*.woff -text
+*.woff2 -text
+*.zip -text
